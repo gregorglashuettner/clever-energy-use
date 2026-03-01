@@ -2,20 +2,11 @@ const subscribeBtn = document.getElementById('subscribeBtn');
 const unsubscribeBtn = document.getElementById('unsubscribeBtn');
 const refreshBtn = document.getElementById('refreshBtn');
 const checkBtn = document.getElementById('checkBtn');
-const saveApiBaseBtn = document.getElementById('saveApiBaseBtn');
 const statusEl = document.getElementById('status');
 const permissionStateEl = document.getElementById('permissionState');
 const deviceNameInput = document.getElementById('deviceName');
-const apiBaseUrlInput = document.getElementById('apiBaseUrl');
 
 let swRegistration;
-let apiBaseUrl = localStorage.getItem('energyWatchApiBaseUrl') || '';
-
-function apiUrl(path) {
-  if (!apiBaseUrl) return path;
-  const normalizedBase = apiBaseUrl.replace(/\/+$/, '');
-  return `${normalizedBase}${path}`;
-}
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -25,7 +16,7 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function getVapidPublicKey() {
-  const response = await fetch(apiUrl('/api/vapid-public-key'));
+  const response = await fetch('/api/vapid-public-key');
   if (!response.ok) {
     throw new Error(`Could not load VAPID key (${response.status})`);
   }
@@ -35,11 +26,11 @@ async function getVapidPublicKey() {
 
 async function updateStatus() {
   try {
-    const response = await fetch(apiUrl('/api/status'));
+    const response = await fetch('/api/status');
     const data = await response.json();
     statusEl.textContent = JSON.stringify(data, null, 2);
   } catch (error) {
-    statusEl.textContent = `Could not reach API. Set API base URL above.\n\n${error.message}`;
+    statusEl.textContent = `Could not reach API.\n\n${error.message}`;
   }
 }
 
@@ -74,7 +65,7 @@ async function subscribe() {
       applicationServerKey
     }));
 
-  await fetch(apiUrl('/api/subscribe'), {
+  await fetch('/api/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -97,7 +88,7 @@ async function unsubscribe() {
     return;
   }
 
-  await fetch(apiUrl('/api/unsubscribe'), {
+  await fetch('/api/unsubscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint: subscription.endpoint })
@@ -112,7 +103,7 @@ async function runCheckNow() {
   const secret = prompt('Enter CHECK_SECRET to run a secure check:');
   if (!secret) return;
 
-  const response = await fetch(apiUrl('/api/check'), {
+  const response = await fetch('/api/check', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${secret}`
@@ -124,17 +115,10 @@ async function runCheckNow() {
 }
 
 async function init() {
-  apiBaseUrlInput.value = apiBaseUrl;
-
   swRegistration = await navigator.serviceWorker.register('./sw.js');
   updatePermissionText();
   await updateStatus();
 
-  saveApiBaseBtn.addEventListener('click', async () => {
-    apiBaseUrl = apiBaseUrlInput.value.trim().replace(/\/+$/, '');
-    localStorage.setItem('energyWatchApiBaseUrl', apiBaseUrl);
-    await updateStatus();
-  });
   subscribeBtn.addEventListener('click', subscribe);
   unsubscribeBtn.addEventListener('click', unsubscribe);
   refreshBtn.addEventListener('click', updateStatus);
