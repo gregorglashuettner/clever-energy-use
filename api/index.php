@@ -306,13 +306,23 @@ function requestPath(): string
         return $normalized === '' ? '/' : $normalized;
     }
 
+    $pathInfo = $_SERVER['PATH_INFO'] ?? null;
+    if (is_string($pathInfo) && $pathInfo !== '') {
+        return '/' . ltrim($pathInfo, '/');
+    }
+
     $requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+    $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
     $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
     if ($scriptDir === '.' || $scriptDir === '/') {
         $scriptDir = '';
     }
 
     $path = $requestUri ?: '/';
+
+    if ($scriptName !== '' && str_starts_with($path, $scriptName)) {
+        $path = substr($path, strlen($scriptName));
+    }
     if ($scriptDir !== '' && str_starts_with($path, $scriptDir)) {
         $path = substr($path, strlen($scriptDir));
     }
@@ -619,7 +629,7 @@ function assertSecret(string $checkSecret, array $query): void
         jsonResponse(500, ['ok' => false, 'error' => 'Missing CHECK_SECRET in environment']);
     }
 
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $authHeader = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
     $headerSecret = null;
     if (str_starts_with($authHeader, 'Bearer ')) {
         $headerSecret = substr($authHeader, 7);
