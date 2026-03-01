@@ -8,9 +8,11 @@ const dailyDigestToggle = document.getElementById('dailyDigestToggle');
 const dailyDigestState = document.getElementById('dailyDigestState');
 const priceChartEl = document.getElementById('priceChart');
 const priceChartMetaEl = document.getElementById('priceChartMeta');
+const statusCardEl = document.getElementById('statusCard');
 const refreshBtn = document.getElementById('refreshBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
+const showDetails = new URLSearchParams(window.location.search).get('details') === 'yes';
 
 let swRegistration;
 const apiBase = new URL('./api/', window.location.href);
@@ -386,11 +388,13 @@ async function updateStatus() {
     cheapestRangeError = error;
   }
 
-  try {
-    const data = await fetchJson('/status');
-    statusEl.textContent = JSON.stringify(data, null, 2);
-  } catch (error) {
-    statusEl.textContent = `Could not reach API.\n\n${error.message}`;
+  if (showDetails) {
+    try {
+      const data = await fetchJson('/status');
+      statusEl.textContent = JSON.stringify(data, null, 2);
+    } catch (error) {
+      statusEl.textContent = `Could not reach API.\n\n${error.message}`;
+    }
   }
 
   if (cheapestRangeError) {
@@ -639,6 +643,10 @@ async function refreshData() {
 }
 
 async function init() {
+  if (showDetails) {
+    statusCardEl?.classList.remove('hidden');
+  }
+
   const slots = buildHalfHourSlots();
   populateTimeSelect(weekdayStartSelect, slots);
   populateTimeSelect(weekdayEndSelect, slots);
