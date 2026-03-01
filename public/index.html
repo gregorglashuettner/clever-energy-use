@@ -7,19 +7,24 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Energy Watch" />
-    <title>Energy Watch</title>
+    <title>Stromkosten sparen!</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="app">
-      <h1>Energy Watch</h1>
-      <p class="subtitle">Tracks source website data and notifies you when values change.</p>
+      <h1>Stromkosten sparen!</h1>
+      <p class="subtitle">Erhalte Benachrichtigungen über billigen Strom</p>
 
       <section class="card">
-        <h2>Device Notifications</h2>
-        <button id="subscribeBtn">Enable Notifications</button>
-        <button id="unsubscribeBtn" class="secondary">Disable Notifications</button>
+        <h2>Benachrichtigungen konfigurieren</h2>
+        <label class="toggle-row" for="notificationToggle">
+          <span id="notificationToggleState">Benachrichtigungen aus</span>
+          <span class="toggle-switch">
+            <input id="notificationToggle" type="checkbox" />
+            <span class="toggle-slider"></span>
+          </span>
+        </label>
         <p id="permissionState" class="small"></p>
       </section>
 

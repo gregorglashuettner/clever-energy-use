@@ -1,5 +1,5 @@
-const subscribeBtn = document.getElementById('subscribeBtn');
-const unsubscribeBtn = document.getElementById('unsubscribeBtn');
+const notificationToggle = document.getElementById('notificationToggle');
+const notificationToggleState = document.getElementById('notificationToggleState');
 const refreshBtn = document.getElementById('refreshBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
@@ -152,6 +152,13 @@ function updatePermissionText() {
   permissionStateEl.textContent = `Notification permission: ${Notification.permission}`;
 }
 
+function setToggleState(enabled) {
+  notificationToggle.checked = enabled;
+  notificationToggleState.textContent = enabled
+    ? 'Benachrichtigungen an'
+    : 'Benachrichtigungen aus';
+}
+
 async function subscribe() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     alert('Web Push is not supported on this device/browser.');
@@ -189,7 +196,7 @@ async function subscribe() {
 
   await updateStatus();
   updatePermissionText();
-  alert('Push notifications enabled.');
+  setToggleState(true);
 }
 
 async function unsubscribe() {
@@ -209,7 +216,32 @@ async function unsubscribe() {
 
   await subscription.unsubscribe();
   await updateStatus();
-  alert('Push notifications disabled.');
+  setToggleState(false);
+}
+
+async function syncNotificationToggle() {
+  if (!swRegistration) {
+    setToggleState(false);
+    return;
+  }
+  const subscription = await swRegistration.pushManager.getSubscription();
+  setToggleState(Boolean(subscription));
+}
+
+async function onNotificationToggleChange() {
+  notificationToggle.disabled = true;
+  try {
+    if (notificationToggle.checked) {
+      await subscribe();
+    } else {
+      await unsubscribe();
+    }
+  } catch (error) {
+    await syncNotificationToggle();
+    alert(`Notification update failed: ${error.message}`);
+  } finally {
+    notificationToggle.disabled = false;
+  }
 }
 
 async function refreshData() {
@@ -228,10 +260,10 @@ async function refreshData() {
 async function init() {
   swRegistration = await navigator.serviceWorker.register('./sw.js');
   updatePermissionText();
+  await syncNotificationToggle();
   await updateStatus();
 
-  subscribeBtn.addEventListener('click', subscribe);
-  unsubscribeBtn.addEventListener('click', unsubscribe);
+  notificationToggle.addEventListener('change', onNotificationToggleChange);
   refreshBtn.addEventListener('click', refreshData);
 }
 
