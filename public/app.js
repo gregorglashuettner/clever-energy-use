@@ -7,20 +7,29 @@ const permissionStateEl = document.getElementById('permissionState');
 const deviceNameInput = document.getElementById('deviceName');
 
 let swRegistration;
-const apiBaseCandidates = [new URL('./api/', window.location.href), new URL('./api/index.php/', window.location.href)];
+const apiBaseCandidates = [
+  { mode: 'rewrite', base: new URL('./api/', window.location.href) },
+  { mode: 'pathinfo', base: new URL('./api/index.php/', window.location.href) },
+  { mode: 'query', base: new URL('./api/index.php', window.location.href) }
+];
 let activeApiBase = apiBaseCandidates[0];
 
-function apiUrl(path, base = activeApiBase) {
+function apiUrl(path, candidate = activeApiBase) {
   const normalized = path.replace(/^\/+/, '');
-  return new URL(normalized, base).toString();
+  if (candidate.mode === 'query') {
+    const url = new URL(candidate.base.toString());
+    url.searchParams.set('route', `/${normalized}`);
+    return url.toString();
+  }
+  return new URL(normalized, candidate.base).toString();
 }
 
 async function fetchJsonWithAutoBase(path, options = {}) {
-  const orderedBases = [activeApiBase, ...apiBaseCandidates.filter((base) => base.href !== activeApiBase.href)];
+  const orderedBases = [activeApiBase, ...apiBaseCandidates.filter((candidate) => candidate.mode !== activeApiBase.mode)];
   const errors = [];
 
-  for (const base of orderedBases) {
-    const url = apiUrl(path, base);
+  for (const candidate of orderedBases) {
+    const url = apiUrl(path, candidate);
     try {
       const response = await fetch(url, options);
       const raw = await response.text();
@@ -30,7 +39,7 @@ async function fetchJsonWithAutoBase(path, options = {}) {
         throw new Error(`API request failed (${response.status})`);
       }
 
-      activeApiBase = base;
+      activeApiBase = candidate;
       return data;
     } catch (error) {
       errors.push(`${url}: ${error.message}`);

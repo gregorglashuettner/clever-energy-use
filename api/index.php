@@ -300,6 +300,12 @@ function loadEnvFile(string $file): void
 
 function requestPath(): string
 {
+    $routeOverride = $_GET['route'] ?? null;
+    if (is_string($routeOverride) && $routeOverride !== '') {
+        $normalized = '/' . ltrim($routeOverride, '/');
+        return $normalized === '' ? '/' : $normalized;
+    }
+
     $requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
     $scriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/');
     if ($scriptDir === '.' || $scriptDir === '/') {
