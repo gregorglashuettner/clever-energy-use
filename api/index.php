@@ -79,11 +79,61 @@ try {
     }
 
     if ($method === 'GET' && $path === '/data') {
+        $state = readJson($stateFile, defaultState());
         $language = (string) ($query['language'] ?? $config['APG_LANGUAGE']);
         $date = isset($query['date']) ? (string) $query['date'] : null;
 
         $apg = fetchApgDayAhead($config, $date, $language);
-        jsonResponse(200, ['ok' => true, 'apg' => $apg]);
+
+        $sameScope = (($state['lastTargetDate'] ?? null) === ($apg['targetDate'] ?? null))
+            && (($state['lastLanguage'] ?? null) === $language);
+
+        $hasChanged = $sameScope && isset($state['lastSignature'])
+            ? ($state['lastSignature'] !== $apg['signature'])
+            : false;
+
+        $previousAveragePrice = is_numeric($state['lastAveragePrice'] ?? null)
+            ? (float) $state['lastAveragePrice']
+            : null;
+        $currentAverage = is_numeric($apg['stats']['average'] ?? null)
+            ? (float) $apg['stats']['average']
+            : null;
+        $averagePriceDelta = ($previousAveragePrice !== null && $currentAverage !== null)
+            ? ($currentAverage - $previousAveragePrice)
+            : null;
+
+        $runRecord = [
+            'at' => gmdate('c'),
+            'trigger' => 'data',
+            'targetDate' => $apg['targetDate'],
+            'language' => $language,
+            'averagePrice' => $apg['stats']['average'],
+            'minPrice' => $apg['stats']['min'],
+            'maxPrice' => $apg['stats']['max'],
+            'spread' => $apg['stats']['spread'],
+            'negativeHours' => $apg['stats']['negativeHours'],
+            'priceCount' => $apg['stats']['count'],
+            'hasChanged' => $hasChanged,
+            'averagePriceDelta' => $averagePriceDelta,
+            'signature' => $apg['signature'],
+            'sourceVersion' => $apg['versionInformation'] ?? null
+        ];
+
+        $nextHistory = $state['history'] ?? [];
+        array_unshift($nextHistory, $runRecord);
+        $nextHistory = array_slice($nextHistory, 0, 50);
+
+        $nextState = [
+            'lastCheckedAt' => $runRecord['at'],
+            'lastTargetDate' => $apg['targetDate'],
+            'lastLanguage' => $language,
+            'lastSignature' => $apg['signature'],
+            'lastAveragePrice' => $apg['stats']['average'],
+            'history' => $nextHistory
+        ];
+
+        writeJson($stateFile, $nextState);
+        jsonResponse(200, ['ok' => true, 'apg' => $apg, 'hasChanged' => $hasChanged, 'averagePriceDelta' => $averagePriceDelta]);
     }
 
     if ($method === 'POST' && $path === '/subscribe') {
@@ -166,6 +216,7 @@ try {
 
         $runRecord = [
             'at' => gmdate('c'),
+            'trigger' => 'check',
             'targetDate' => $apg['targetDate'],
             'language' => $language,
             'averagePrice' => $apg['stats']['average'],

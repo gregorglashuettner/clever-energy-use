@@ -129,6 +129,13 @@ async function getVapidPublicKey() {
 }
 
 async function updateStatus() {
+  let cheapestRangeError = null;
+  try {
+    await updateCheapestRange();
+  } catch (error) {
+    cheapestRangeError = error;
+  }
+
   try {
     const data = await fetchJson('/status');
     statusEl.textContent = JSON.stringify(data, null, 2);
@@ -136,10 +143,8 @@ async function updateStatus() {
     statusEl.textContent = `Could not reach API.\n\n${error.message}`;
   }
 
-  try {
-    await updateCheapestRange();
-  } catch (error) {
-    cheapestRangeEl.textContent = `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): unavailable (${error.message})`;
+  if (cheapestRangeError) {
+    cheapestRangeEl.textContent = `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): unavailable (${cheapestRangeError.message})`;
   }
 }
 
@@ -208,7 +213,16 @@ async function unsubscribe() {
 }
 
 async function refreshData() {
-  await updateStatus();
+  const originalLabel = refreshBtn.textContent;
+  refreshBtn.disabled = true;
+  refreshBtn.textContent = 'Refreshing...';
+
+  try {
+    await updateStatus();
+  } finally {
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = originalLabel;
+  }
 }
 
 async function init() {

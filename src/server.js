@@ -313,14 +313,63 @@ app.get('/api/status', async (_req, res) => {
 
 app.get('/api/data', async (req, res) => {
   try {
+    const state = await readJson(stateFile, {
+      lastCheckedAt: null,
+      lastTargetDate: null,
+      lastSignature: null,
+      lastAveragePrice: null,
+      history: []
+    });
     const language = String(req.query.language || APG_LANGUAGE);
     const date = req.query.date ? String(req.query.date) : undefined;
 
-    const result = await fetchApgDayAhead({ date, language });
+    const apg = await fetchApgDayAhead({ date, language });
+
+    const sameScope =
+      state.lastTargetDate === apg.targetDate &&
+      state.lastLanguage === language;
+
+    const hasChanged = sameScope && state.lastSignature != null ? state.lastSignature !== apg.signature : false;
+
+    const previousAveragePrice = typeof state.lastAveragePrice === 'number' ? state.lastAveragePrice : null;
+    const averagePriceDelta =
+      previousAveragePrice == null || apg.stats.average == null
+        ? null
+        : apg.stats.average - previousAveragePrice;
+
+    const runRecord = {
+      at: new Date().toISOString(),
+      trigger: 'data',
+      targetDate: apg.targetDate,
+      language,
+      averagePrice: apg.stats.average,
+      minPrice: apg.stats.min,
+      maxPrice: apg.stats.max,
+      spread: apg.stats.spread,
+      negativeHours: apg.stats.negativeHours,
+      priceCount: apg.stats.count,
+      hasChanged,
+      averagePriceDelta,
+      signature: apg.signature,
+      sourceVersion: apg.versionInformation
+    };
+
+    const nextState = {
+      lastCheckedAt: runRecord.at,
+      lastTargetDate: apg.targetDate,
+      lastLanguage: language,
+      lastSignature: apg.signature,
+      lastAveragePrice: apg.stats.average,
+      history: [runRecord, ...(state.history || [])].slice(0, 50)
+    };
+
+    await writeJson(stateFile, nextState);
 
     res.json({
       ok: true,
-      apg: result
+      apg,
+      hasChanged,
+      averagePriceDelta
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -412,6 +461,7 @@ app.post('/api/check', assertSecret, async (req, res) => {
 
     const runRecord = {
       at: new Date().toISOString(),
+      trigger: 'check',
       targetDate: apg.targetDate,
       language,
       averagePrice: apg.stats.average,
