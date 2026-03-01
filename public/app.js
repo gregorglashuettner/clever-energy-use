@@ -357,7 +357,6 @@ async function handleFeatureToggleChange() {
     saveNotificationSettings(nextSettings);
     await onNotificationSettingsChange();
     await updateStatus();
-    updatePermissionText();
   } catch (error) {
     applyNotificationSettings(previousSettings);
     saveNotificationSettings(previousSettings);
