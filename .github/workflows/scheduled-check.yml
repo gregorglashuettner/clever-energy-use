@@ -1,0 +1,24 @@
+name: Scheduled Source Check
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger secure check endpoint
+        env:
+          CHECK_URL: ${{ secrets.WEBSITE_CHECK_URL }}
+          CHECK_SECRET: ${{ secrets.WEBSITE_CHECK_SECRET }}
+        run: |
+          if [ -z "$CHECK_URL" ] || [ -z "$CHECK_SECRET" ]; then
+            echo "Missing WEBSITE_CHECK_URL or WEBSITE_CHECK_SECRET repo secret"
+            exit 1
+          fi
+
+          curl -sS -X POST "$CHECK_URL" \
+            -H "Authorization: Bearer $CHECK_SECRET" \
+            -H "Content-Type: application/json"

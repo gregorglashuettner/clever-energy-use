@@ -1,0 +1,8 @@
+{
+  "name": "Energy Watch",
+  "short_name": "EWatch",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2f7f6",
+  "theme_color": "#0a4f44"
+}

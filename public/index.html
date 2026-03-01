@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a4f44" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Energy Watch" />
+    <title>Energy Watch</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>Energy Watch</h1>
+      <p class="subtitle">Tracks source website data and notifies you when values change.</p>
+
+      <section class="card">
+        <h2>Device Notifications</h2>
+        <label for="deviceName">Device name</label>
+        <input id="deviceName" placeholder="e.g. Gregor iPhone" maxlength="80" />
+        <button id="subscribeBtn">Enable Notifications</button>
+        <button id="unsubscribeBtn" class="secondary">Disable Notifications</button>
+        <p id="permissionState" class="small"></p>
+      </section>
+
+      <section class="card">
+        <h2>Current Status</h2>
+        <button id="refreshBtn" class="secondary">Refresh</button>
+        <button id="checkBtn" class="secondary">Run Check Now</button>
+        <pre id="status"></pre>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
