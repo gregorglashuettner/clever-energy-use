@@ -18,13 +18,13 @@ const {
   PORT = 3000,
   APG_BASE_URL = 'https://transparency.apg.at/api',
   APG_LANGUAGE = 'English',
-  APG_RESOLUTION = 'PT15M',
   APG_DAY_OFFSET = '1',
   CHECK_SECRET,
   VAPID_PUBLIC_KEY,
   VAPID_PRIVATE_KEY,
   VAPID_SUBJECT = 'mailto:admin@example.com'
 } = process.env;
+const APG_RESOLUTION = 'PT15M';
 
 if (!CHECK_SECRET) {
   throw new Error('Missing CHECK_SECRET in environment');
@@ -176,14 +176,14 @@ function buildSeriesSignature(series) {
   return crypto.createHash('sha256').update(compact).digest('hex');
 }
 
-async function fetchApgDayAhead({ date, resolution, language }) {
+async function fetchApgDayAhead({ date, language }) {
   const targetDate = getTargetDate(date);
   const toDate = addDays(targetDate, 1);
 
   const fromlocal = toApgDateTimeStartOfDay(targetDate);
   const tolocal = toApgDateTimeStartOfDay(toDate);
 
-  const url = `${APG_BASE_URL}/v1/EXAAD1P/Data/${encodeURIComponent(language)}/${encodeURIComponent(resolution)}/${fromlocal}/${tolocal}`;
+  const url = `${APG_BASE_URL}/v1/EXAAD1P/Data/${encodeURIComponent(language)}/${APG_RESOLUTION}/${fromlocal}/${tolocal}`;
 
   const response = await fetch(url, {
     headers: {
@@ -226,8 +226,8 @@ async function fetchApgDayAhead({ date, resolution, language }) {
   return {
     targetDate,
     range: { fromlocal, tolocal },
-    endpoint: '/v1/EXAAD1P/Data/{language}/{resolution}/{fromlocal}/{tolocal}',
-    request: { language, resolution },
+    endpoint: '/v1/EXAAD1P/Data/{language}/PT15M/{fromlocal}/{tolocal}',
+    request: { language, resolution: APG_RESOLUTION },
     sourceUrl: url,
     versionInformation: responseData.VersionInformation || null,
     description: responseData.Description || null,
@@ -314,10 +314,9 @@ app.get('/api/status', async (_req, res) => {
 app.get('/api/data', async (req, res) => {
   try {
     const language = String(req.query.language || APG_LANGUAGE);
-    const resolution = String(req.query.resolution || APG_RESOLUTION);
     const date = req.query.date ? String(req.query.date) : undefined;
 
-    const result = await fetchApgDayAhead({ date, resolution, language });
+    const result = await fetchApgDayAhead({ date, language });
 
     res.json({
       ok: true,
@@ -332,10 +331,10 @@ app.get('/api/spec', (_req, res) => {
   res.json({
     openApiSpec: 'https://transparency.apg.at/api/swagger/v1/swagger.json',
     swaggerUi: 'https://transparency.apg.at/api/swagger/index.html',
-    dayAheadEndpoint: '/v1/EXAAD1P/Data/{language}/{resolution}/{fromlocal}/{tolocal}',
+    dayAheadEndpoint: '/v1/EXAAD1P/Data/{language}/PT15M/{fromlocal}/{tolocal}',
     parameters: {
       language: ['English', 'German'],
-      resolution: ['PT15M', 'PT60M'],
+      resolution: ['PT15M'],
       fromlocal: 'yyyy-MM-ddTHHmmss',
       tolocal: 'yyyy-MM-ddTHHmmss (max 1 day after fromlocal)'
     },
@@ -345,7 +344,6 @@ app.get('/api/spec', (_req, res) => {
 
 app.post('/api/subscribe', async (req, res) => {
   const subscription = req.body?.subscription;
-  const deviceName = req.body?.deviceName || 'Unnamed device';
 
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
     return res.status(400).json({ error: 'Invalid push subscription payload' });
@@ -357,7 +355,6 @@ app.post('/api/subscribe', async (req, res) => {
 
   const entry = {
     id,
-    deviceName,
     subscription,
     createdAt: new Date().toISOString()
   };
@@ -397,14 +394,12 @@ app.post('/api/check', assertSecret, async (req, res) => {
     });
 
     const language = String(req.query.language || APG_LANGUAGE);
-    const resolution = String(req.query.resolution || APG_RESOLUTION);
     const date = req.query.date ? String(req.query.date) : undefined;
 
-    const apg = await fetchApgDayAhead({ date, resolution, language });
+    const apg = await fetchApgDayAhead({ date, language });
 
     const sameScope =
       state.lastTargetDate === apg.targetDate &&
-      state.lastResolution === resolution &&
       state.lastLanguage === language;
 
     const hasChanged = sameScope && state.lastSignature != null ? state.lastSignature !== apg.signature : false;
@@ -419,7 +414,6 @@ app.post('/api/check', assertSecret, async (req, res) => {
       at: new Date().toISOString(),
       targetDate: apg.targetDate,
       language,
-      resolution,
       averagePrice: apg.stats.average,
       minPrice: apg.stats.min,
       maxPrice: apg.stats.max,
@@ -435,7 +429,6 @@ app.post('/api/check', assertSecret, async (req, res) => {
     const nextState = {
       lastCheckedAt: runRecord.at,
       lastTargetDate: apg.targetDate,
-      lastResolution: resolution,
       lastLanguage: language,
       lastSignature: apg.signature,
       lastAveragePrice: apg.stats.average,

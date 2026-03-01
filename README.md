@@ -12,7 +12,7 @@ This project contains:
 
 - Swagger UI: `https://transparency.apg.at/api/swagger/index.html`
 - OpenAPI JSON: `https://transparency.apg.at/api/swagger/v1/swagger.json`
-- Used endpoint: `/v1/EXAAD1P/Data/{language}/{resolution}/{fromlocal}/{tolocal}`
+- Used endpoint: `/v1/EXAAD1P/Data/{language}/PT15M/{fromlocal}/{tolocal}`
 
 ## 1) Setup
 
@@ -62,14 +62,13 @@ Open `http://localhost:3000`.
   - Fetches APG day-ahead prices and returns the raw series plus calculated stats.
   - Optional query params:
     - `date=YYYY-MM-DD` (defaults to `today + APG_DAY_OFFSET` in Europe/Vienna)
-    - `resolution=PT15M|PT60M`
     - `language=English|German`
 - `GET /api/status`
   - Returns latest run metadata and subscriber count.
 - `POST /api/check`
   - Secure check endpoint used by GitHub Actions.
   - Requires `Authorization: Bearer <CHECK_SECRET>`
-  - Optional query params: `date`, `resolution`, `language`
+  - Optional query params: `date`, `language`
 - `POST /api/subscribe` / `POST /api/unsubscribe`
   - Device push subscription management.
 

@@ -67,10 +67,10 @@ try {
         jsonResponse(200, [
             'openApiSpec' => 'https://transparency.apg.at/api/swagger/v1/swagger.json',
             'swaggerUi' => 'https://transparency.apg.at/api/swagger/index.html',
-            'dayAheadEndpoint' => '/v1/EXAAD1P/Data/{language}/{resolution}/{fromlocal}/{tolocal}',
+            'dayAheadEndpoint' => '/v1/EXAAD1P/Data/{language}/PT15M/{fromlocal}/{tolocal}',
             'parameters' => [
                 'language' => ['English', 'German'],
-                'resolution' => ['PT15M', 'PT60M'],
+                'resolution' => ['PT15M'],
                 'fromlocal' => 'yyyy-MM-ddTHHmmss',
                 'tolocal' => 'yyyy-MM-ddTHHmmss (max 1 day after fromlocal)'
             ],
@@ -80,16 +80,14 @@ try {
 
     if ($method === 'GET' && $path === '/data') {
         $language = (string) ($query['language'] ?? $config['APG_LANGUAGE']);
-        $resolution = (string) ($query['resolution'] ?? $config['APG_RESOLUTION']);
         $date = isset($query['date']) ? (string) $query['date'] : null;
 
-        $apg = fetchApgDayAhead($config, $date, $resolution, $language);
+        $apg = fetchApgDayAhead($config, $date, $language);
         jsonResponse(200, ['ok' => true, 'apg' => $apg]);
     }
 
     if ($method === 'POST' && $path === '/subscribe') {
         $subscription = $body['subscription'] ?? null;
-        $deviceName = trim((string) ($body['deviceName'] ?? 'Unnamed device'));
 
         if (!is_array($subscription)
             || !isset($subscription['endpoint'])
@@ -103,7 +101,6 @@ try {
 
         $entry = [
             'id' => $id,
-            'deviceName' => $deviceName !== '' ? $deviceName : 'Unnamed device',
             'subscription' => $subscription,
             'createdAt' => gmdate('c')
         ];
@@ -146,13 +143,11 @@ try {
 
         $state = readJson($stateFile, defaultState());
         $language = (string) ($query['language'] ?? $config['APG_LANGUAGE']);
-        $resolution = (string) ($query['resolution'] ?? $config['APG_RESOLUTION']);
         $date = isset($query['date']) ? (string) $query['date'] : null;
 
-        $apg = fetchApgDayAhead($config, $date, $resolution, $language);
+        $apg = fetchApgDayAhead($config, $date, $language);
 
         $sameScope = (($state['lastTargetDate'] ?? null) === ($apg['targetDate'] ?? null))
-            && (($state['lastResolution'] ?? null) === $resolution)
             && (($state['lastLanguage'] ?? null) === $language);
 
         $hasChanged = $sameScope && isset($state['lastSignature'])
@@ -173,7 +168,6 @@ try {
             'at' => gmdate('c'),
             'targetDate' => $apg['targetDate'],
             'language' => $language,
-            'resolution' => $resolution,
             'averagePrice' => $apg['stats']['average'],
             'minPrice' => $apg['stats']['min'],
             'maxPrice' => $apg['stats']['max'],
@@ -193,7 +187,6 @@ try {
         $nextState = [
             'lastCheckedAt' => $runRecord['at'],
             'lastTargetDate' => $apg['targetDate'],
-            'lastResolution' => $resolution,
             'lastLanguage' => $language,
             'lastSignature' => $apg['signature'],
             'lastAveragePrice' => $apg['stats']['average'],
@@ -506,7 +499,7 @@ function buildSeriesSignature(array $series): string
     return hash('sha256', implode('|', $parts));
 }
 
-function fetchApgDayAhead(array $config, ?string $date, string $resolution, string $language): array
+function fetchApgDayAhead(array $config, ?string $date, string $language): array
 {
     $targetDate = getTargetDate($config, $date);
     $toDate = addDays($targetDate, 1);
@@ -516,7 +509,7 @@ function fetchApgDayAhead(array $config, ?string $date, string $resolution, stri
     $url = $config['APG_BASE_URL']
         . '/v1/EXAAD1P/Data/'
         . rawurlencode($language)
-        . '/' . rawurlencode($resolution)
+        . '/PT15M'
         . '/' . $fromLocal
         . '/' . $toLocal;
 
@@ -562,8 +555,8 @@ function fetchApgDayAhead(array $config, ?string $date, string $resolution, stri
     return [
         'targetDate' => $targetDate,
         'range' => ['fromlocal' => $fromLocal, 'tolocal' => $toLocal],
-        'endpoint' => '/v1/EXAAD1P/Data/{language}/{resolution}/{fromlocal}/{tolocal}',
-        'request' => ['language' => $language, 'resolution' => $resolution],
+        'endpoint' => '/v1/EXAAD1P/Data/{language}/PT15M/{fromlocal}/{tolocal}',
+        'request' => ['language' => $language, 'resolution' => 'PT15M'],
         'sourceUrl' => $url,
         'versionInformation' => $responseData['VersionInformation'] ?? null,
         'description' => $responseData['Description'] ?? null,

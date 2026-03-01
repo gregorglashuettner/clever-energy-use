@@ -5,7 +5,6 @@ const checkBtn = document.getElementById('checkBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
 const permissionStateEl = document.getElementById('permissionState');
-const deviceNameInput = document.getElementById('deviceName');
 
 let swRegistration;
 const apiBase = new URL('./api/', window.location.href);
@@ -41,11 +40,6 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
-function resolutionToMinutes(resolution) {
-  if (resolution === 'PT15M') return 15;
-  return 15;
-}
-
 function normalizeDate(date) {
   const value = String(date || '');
   if (/^\d{8}$/.test(value)) {
@@ -69,8 +63,8 @@ function formatDateTime(date, time) {
   return `${normalizeDate(date)} ${normalizeTime(time)}`.trim();
 }
 
-function findCheapestRange(series, resolution, minimumMinutes = 45) {
-  const slotMinutes = resolutionToMinutes(resolution);
+function findCheapestRange(series, minimumMinutes = 45) {
+  const slotMinutes = 15;
   const windowSize = Math.max(1, Math.ceil(minimumMinutes / slotMinutes));
 
   if (!Array.isArray(series) || series.length < windowSize) {
@@ -111,11 +105,10 @@ function findCheapestRange(series, resolution, minimumMinutes = 45) {
 }
 
 async function updateCheapestRange() {
-  const data = await fetchJson('/data?resolution=PT15M');
+  const data = await fetchJson('/data');
   const apg = data?.apg;
   const series = apg?.series || [];
-  const resolution = apg?.request?.resolution || 'PT15M';
-  const cheapest = findCheapestRange(series, resolution, 45);
+  const cheapest = findCheapestRange(series, 45);
 
   if (!cheapest) {
     cheapestRangeEl.textContent = `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): unavailable`;
@@ -184,7 +177,6 @@ async function subscribe() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      deviceName: deviceNameInput.value.trim() || 'Unnamed device',
       subscription
     })
   });
@@ -218,7 +210,7 @@ async function runCheckNow() {
   const secret = prompt('Enter CHECK_SECRET to run a secure check:');
   if (!secret) return;
 
-  const data = await fetchJson('/check?resolution=PT15M', {
+  const data = await fetchJson('/check', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${secret}`
