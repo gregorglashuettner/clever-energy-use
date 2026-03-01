@@ -9,7 +9,6 @@ const dailyDigestState = document.getElementById('dailyDigestState');
 const refreshBtn = document.getElementById('refreshBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
-const permissionStateEl = document.getElementById('permissionState');
 
 let swRegistration;
 const apiBase = new URL('./api/', window.location.href);
@@ -155,10 +154,6 @@ async function updateStatus() {
   }
 }
 
-function updatePermissionText() {
-  permissionStateEl.textContent = `Notification permission: ${Notification.permission}`;
-}
-
 function buildHalfHourSlots() {
   const slots = [];
   for (let hour = 4; hour <= 22; hour += 1) {
@@ -248,8 +243,8 @@ async function persistSettingsToServer(settings) {
 function setDailyDigestState(enabled) {
   dailyDigestToggle.checked = enabled;
   dailyDigestState.textContent = enabled
-    ? 'Tägliche Zusammenfassung an'
-    : 'Tägliche Zusammenfassung aus';
+    ? 'Tägliche Zusammenfassung: an'
+    : 'Tägliche Zusammenfassung: aus';
 }
 
 function applyNotificationSettings(settings) {
@@ -275,8 +270,8 @@ async function onNotificationSettingsChange() {
 function setToggleState(enabled) {
   notificationToggle.checked = enabled;
   notificationToggleState.textContent = enabled
-    ? 'Benachrichtigen wenn der Strom billig wird an'
-    : 'Benachrichtigen wenn der Strom billig wird aus';
+    ? 'Benachrichtigen wenn der Strom billig wird: an'
+    : 'Benachrichtigen wenn der Strom billig wird: aus';
 }
 
 async function subscribe() {
@@ -289,7 +284,6 @@ async function subscribe() {
   }
 
   if (Notification.permission !== 'granted') {
-    updatePermissionText();
     throw new Error('Notification permission denied.');
   }
 
@@ -317,7 +311,6 @@ async function subscribe() {
     })
   });
 
-  updatePermissionText();
   return true;
 }
 
@@ -411,7 +404,6 @@ async function init() {
   applyNotificationSettings(loadNotificationSettings());
 
   swRegistration = await navigator.serviceWorker.register('./sw.js');
-  updatePermissionText();
   const subscription = await getCurrentSubscription();
   if (!subscription) {
     const settings = {
