@@ -99,6 +99,19 @@ function getTodayViennaDateString() {
   return dateKey(d);
 }
 
+function getNowMinutesInVienna() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Vienna',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + minute;
+}
+
 function easterSunday(year) {
   const a = year % 19;
   const b = Math.floor(year / 100);
@@ -304,10 +317,28 @@ function renderPriceChart(series, windowData) {
     )
     .join('');
 
+  const startMinutes = parseTimeToMinutes(windowData.windowStart);
+  const endMinutes = parseTimeToMinutes(windowData.windowEnd);
+  const nowMinutes = getNowMinutesInVienna();
+  let currentTimeLine = '';
+  if (
+    nowMinutes != null &&
+    startMinutes != null &&
+    endMinutes != null &&
+    endMinutes > startMinutes &&
+    nowMinutes >= startMinutes &&
+    nowMinutes < endMinutes
+  ) {
+    const ratio = (nowMinutes - startMinutes) / (endMinutes - startMinutes);
+    const xNow = left + ratio * plotW;
+    currentTimeLine = `<line x1="${xNow.toFixed(2)}" y1="${top}" x2="${xNow.toFixed(2)}" y2="${height - bottom}" stroke="#dc2626" stroke-width="2" />`;
+  }
+
   priceChartEl.innerHTML = `
     <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" stroke="#9ec7bf" stroke-width="1" />
     <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="#9ec7bf" stroke-width="1" />
     <polyline fill="none" stroke="#0a7b68" stroke-width="2.5" points="${points.join(' ')}" />
+    ${currentTimeLine}
     ${tickLines}
     ${tickTexts}
   `;
