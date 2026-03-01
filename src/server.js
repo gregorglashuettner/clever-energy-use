@@ -13,6 +13,7 @@ const rootDir = path.resolve(__dirname, '..');
 const dataDir = path.join(rootDir, 'data');
 const stateFile = path.join(dataDir, 'state.json');
 const subscriptionsFile = path.join(dataDir, 'subscriptions.json');
+const apgCacheFile = path.join(dataDir, 'apg-cache.json');
 
 const {
   PORT = 3000,
@@ -25,6 +26,7 @@ const {
   VAPID_SUBJECT = 'mailto:admin@example.com'
 } = process.env;
 const APG_RESOLUTION = 'PT15M';
+const APG_CACHE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
 if (!WEBSITE_CHECK_SECRET) {
   throw new Error('Missing WEBSITE_CHECK_SECRET in environment');
@@ -53,6 +55,8 @@ async function ensureDataFiles() {
         lastTargetDate: null,
         lastSignature: null,
         lastAveragePrice: null,
+        todayTypeDate: null,
+        todayType: null,
         history: []
       }, null, 2),
       'utf8'
@@ -63,6 +67,12 @@ async function ensureDataFiles() {
     await fs.access(subscriptionsFile);
   } catch {
     await fs.writeFile(subscriptionsFile, JSON.stringify([], null, 2), 'utf8');
+  }
+
+  try {
+    await fs.access(apgCacheFile);
+  } catch {
+    await fs.writeFile(apgCacheFile, JSON.stringify({ entries: {} }, null, 2), 'utf8');
   }
 }
 
@@ -125,6 +135,290 @@ function normalizeNotificationSettings(input) {
   return settings;
 }
 
+function getViennaNowParts() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vienna',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+
+  const get = (type) => Number(parts.find((p) => p.type === type)?.value);
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute')
+  };
+}
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function dateObjToKey(dateObj) {
+  return `${String(dateObj.year)}-${pad2(dateObj.month)}-${pad2(dateObj.day)}`;
+}
+
+function timeToMinutes(value) {
+  if (typeof value !== 'string' || !/^\d{2}:\d{2}$/.test(value)) return null;
+  const [h, m] = value.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return { year, month, day };
+}
+
+function addDaysObj(dateObj, days) {
+  const dt = new Date(Date.UTC(dateObj.year, dateObj.month - 1, dateObj.day));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return {
+    year: dt.getUTCFullYear(),
+    month: dt.getUTCMonth() + 1,
+    day: dt.getUTCDate()
+  };
+}
+
+function buildAustriaHolidaySet(year) {
+  const set = new Set([
+    `${year}-01-01`,
+    `${year}-01-06`,
+    `${year}-05-01`,
+    `${year}-08-15`,
+    `${year}-10-26`,
+    `${year}-11-01`,
+    `${year}-12-08`,
+    `${year}-12-25`,
+    `${year}-12-26`
+  ]);
+
+  const easter = easterSunday(year);
+  for (const offset of [1, 39, 50, 60]) {
+    set.add(dateObjToKey(addDaysObj(easter, offset)));
+  }
+  return set;
+}
+
+function isAustriaHoliday(dateObj) {
+  return buildAustriaHolidaySet(dateObj.year).has(dateObjToKey(dateObj));
+}
+
+function isWeekend(dateObj) {
+  const dt = new Date(Date.UTC(dateObj.year, dateObj.month - 1, dateObj.day));
+  const day = dt.getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function pickWindowForDate(settings, dateObj) {
+  const type = dayTypeForDate(dateObj);
+  if (type === 'Feiertag/Wochenende') {
+    return {
+      start: settings.holidayStart,
+      end: settings.holidayEnd,
+      dayType: type
+    };
+  }
+  return {
+    start: settings.weekdayStart,
+    end: settings.weekdayEnd,
+    dayType: type
+  };
+}
+
+function pickWindowForDayType(settings, dayType) {
+  if (dayType === 'Feiertag/Wochenende') {
+    return {
+      start: settings.holidayStart,
+      end: settings.holidayEnd,
+      dayType
+    };
+  }
+  return {
+    start: settings.weekdayStart,
+    end: settings.weekdayEnd,
+    dayType: 'Werktag'
+  };
+}
+
+function filterSeriesByWindow(series, windowStart, windowEnd) {
+  const startMin = timeToMinutes(windowStart);
+  const endMin = timeToMinutes(windowEnd);
+  if (startMin == null || endMin == null || startMin >= endMin) {
+    return [];
+  }
+  return (series || []).filter((row) => {
+    const rowStart = timeToMinutes(row.timeFrom);
+    return rowStart != null && rowStart >= startMin && rowStart < endMin;
+  });
+}
+
+function findCheapestRange(series, slotCount = 3) {
+  if (!Array.isArray(series) || series.length < slotCount) return null;
+  const values = series.map((row) => Number(row.price));
+  if (values.some((v) => !Number.isFinite(v))) return null;
+
+  let sum = 0;
+  for (let i = 0; i < slotCount; i += 1) sum += values[i];
+  let bestStart = 0;
+  let bestAvg = sum / slotCount;
+  for (let i = 1; i <= values.length - slotCount; i += 1) {
+    sum += values[i + slotCount - 1] - values[i - 1];
+    const avg = sum / slotCount;
+    if (avg < bestAvg) {
+      bestAvg = avg;
+      bestStart = i;
+    }
+  }
+  return {
+    start: series[bestStart],
+    end: series[bestStart + slotCount - 1],
+    average: bestAvg
+  };
+}
+
+async function sendPushToEntry(entry, payload) {
+  try {
+    await webpush.sendNotification(entry.subscription, JSON.stringify(payload));
+    return { ok: true, invalid: false };
+  } catch (error) {
+    const statusCode = error?.statusCode;
+    if (statusCode === 404 || statusCode === 410) {
+      return { ok: false, invalid: true };
+    }
+    return { ok: false, invalid: false };
+  }
+}
+
+async function evaluateUserNotifications(apg, todayType) {
+  const subscriptions = await readJson(subscriptionsFile, []);
+  if (!subscriptions.length) {
+    return { digestSent: 0, cheapSent: 0, removed: 0, total: 0, skipped: 'no_subscriptions' };
+  }
+
+  const now = getViennaNowParts();
+  const todayKey = dateObjToKey(now);
+  if (apg.targetDate !== todayKey) {
+    return { digestSent: 0, cheapSent: 0, removed: 0, total: subscriptions.length, skipped: 'not_today_target' };
+  }
+
+  const nowMinutes = now.hour * 60 + now.minute;
+  let digestSent = 0;
+  let cheapSent = 0;
+  let removed = 0;
+  let changed = false;
+  const keep = [];
+
+  for (const entry of subscriptions) {
+    const settings = normalizeNotificationSettings(entry.settings);
+    const history = entry.notificationHistory && typeof entry.notificationHistory === 'object'
+      ? entry.notificationHistory
+      : {};
+    const window = pickWindowForDayType(settings, todayType || dayTypeForDate(now));
+    const startMin = timeToMinutes(window.start);
+    const endMin = timeToMinutes(window.end);
+    const inWindow =
+      startMin != null &&
+      endMin != null &&
+      endMin > startMin &&
+      nowMinutes >= startMin &&
+      nowMinutes < endMin;
+
+    let invalid = false;
+
+    if (settings.dailyDigestEnabled && inWindow && history.lastDigestDate !== todayKey) {
+      const payload = {
+        title: 'Deine Benachrichtigung über den heutigen Strompreis',
+        body: `Heute (${window.dayType}) im Zeitfenster ${window.start}-${window.end}: Durchschnitt ${apg.stats.average?.toFixed(2) ?? 'n/a'} EUR/MWh.`,
+        url: '/',
+        data: { type: 'daily_digest', targetDate: apg.targetDate }
+      };
+      const result = await sendPushToEntry(entry, payload);
+      if (result.invalid) {
+        invalid = true;
+      } else if (result.ok) {
+        digestSent += 1;
+        history.lastDigestDate = todayKey;
+        changed = true;
+      }
+    }
+
+    if (!invalid && settings.cheapAlertEnabled && inWindow && history.lastCheapAlertDate !== todayKey) {
+      const inWindowSeries = filterSeriesByWindow(apg.series, window.start, window.end);
+      const cheapest = findCheapestRange(inWindowSeries, 3);
+      if (cheapest) {
+        const cheapStart = timeToMinutes(cheapest.start.timeFrom);
+        const cheapEnd = timeToMinutes(cheapest.end.timeTo);
+        const inCheapRange =
+          cheapStart != null &&
+          cheapEnd != null &&
+          cheapEnd > cheapStart &&
+          nowMinutes >= cheapStart &&
+          nowMinutes < cheapEnd;
+        if (inCheapRange) {
+          const payload = {
+            title: 'Der Strom ist ab jetzt billig!',
+            body: `${window.dayType} ${window.start}-${window.end}: günstigster Bereich gestartet (${cheapest.start.timeFrom}-${cheapest.end.timeTo}).`,
+            url: '/',
+            data: { type: 'cheap_alert', targetDate: apg.targetDate }
+          };
+          const result = await sendPushToEntry(entry, payload);
+          if (result.invalid) {
+            invalid = true;
+          } else if (result.ok) {
+            cheapSent += 1;
+            history.lastCheapAlertDate = todayKey;
+            changed = true;
+          }
+        }
+      }
+    }
+
+    if (invalid) {
+      removed += 1;
+      changed = true;
+      continue;
+    }
+
+    keep.push({
+      ...entry,
+      settings,
+      notificationHistory: history
+    });
+  }
+
+  if (changed) {
+    await writeJson(subscriptionsFile, keep);
+  }
+
+  return {
+    digestSent,
+    cheapSent,
+    removed,
+    total: subscriptions.length,
+    skipped: null
+  };
+}
+
 function todayViennaDateString() {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Vienna',
@@ -160,6 +454,29 @@ function getTargetDate(requestedDate) {
   const offset = Number.parseInt(APG_DAY_OFFSET, 10);
   const safeOffset = Number.isFinite(offset) ? offset : 1;
   return addDays(todayViennaDateString(), safeOffset);
+}
+
+function dayTypeForDate(dateObj) {
+  return isAustriaHoliday(dateObj) || isWeekend(dateObj)
+    ? 'Feiertag/Wochenende'
+    : 'Werktag';
+}
+
+function resolveTodayType(state) {
+  const now = getViennaNowParts();
+  const todayKey = dateObjToKey(now);
+  const persistedType = state?.todayType;
+  if (
+    state?.todayTypeDate === todayKey &&
+    (persistedType === 'Werktag' || persistedType === 'Feiertag/Wochenende')
+  ) {
+    return { todayType: persistedType, todayTypeDate: todayKey };
+  }
+
+  return {
+    todayType: dayTypeForDate(now),
+    todayTypeDate: todayKey
+  };
 }
 
 function pickPriceValue(columnNames, rowValues) {
@@ -281,6 +598,33 @@ async function fetchApgDayAhead({ date, language }) {
   };
 }
 
+function apgCacheKey(date, language) {
+  return `${date}|${language}|${APG_RESOLUTION}`;
+}
+
+async function getCachedOrFetchApgDayAhead({ date, language }) {
+  const targetDate = getTargetDate(date);
+  const cache = await readJson(apgCacheFile, { entries: {} });
+  const entries = cache?.entries && typeof cache.entries === 'object' ? cache.entries : {};
+  const key = apgCacheKey(targetDate, language);
+  const entry = entries[key];
+
+  if (entry?.fetchedAt && entry?.apg) {
+    const fetchedAtMs = Date.parse(entry.fetchedAt);
+    if (Number.isFinite(fetchedAtMs) && Date.now() - fetchedAtMs <= APG_CACHE_MAX_AGE_MS) {
+      return { apg: entry.apg, fromCache: true };
+    }
+  }
+
+  const apg = await fetchApgDayAhead({ date: targetDate, language });
+  entries[key] = {
+    fetchedAt: new Date().toISOString(),
+    apg
+  };
+  await writeJson(apgCacheFile, { entries });
+  return { apg, fromCache: false };
+}
+
 async function sendPushToAll(payload) {
   const subscriptions = await readJson(subscriptionsFile, []);
   if (!subscriptions.length) {
@@ -335,6 +679,8 @@ app.get('/api/status', async (_req, res) => {
     lastTargetDate: null,
     lastSignature: null,
     lastAveragePrice: null,
+    todayTypeDate: null,
+    todayType: null,
     history: []
   });
   const subscriptions = await readJson(subscriptionsFile, []);
@@ -348,6 +694,8 @@ app.get('/api/status', async (_req, res) => {
     lastTargetDate: state.lastTargetDate,
     lastAveragePrice: state.lastAveragePrice,
     lastCheckedAt: state.lastCheckedAt,
+    todayTypeDate: state.todayTypeDate,
+    todayType: state.todayType,
     latestRun: state.history?.[0] ?? null,
     subscribers: subscriptions.length
   });
@@ -360,12 +708,15 @@ app.get('/api/data', async (req, res) => {
       lastTargetDate: null,
       lastSignature: null,
       lastAveragePrice: null,
+      todayTypeDate: null,
+      todayType: null,
       history: []
     });
+    const todayTypeInfo = resolveTodayType(state);
     const language = String(req.query.language || APG_LANGUAGE);
     const date = req.query.date ? String(req.query.date) : undefined;
 
-    const apg = await fetchApgDayAhead({ date, language });
+    const { apg, fromCache } = await getCachedOrFetchApgDayAhead({ date, language });
 
     const sameScope =
       state.lastTargetDate === apg.targetDate &&
@@ -402,16 +753,21 @@ app.get('/api/data', async (req, res) => {
       lastLanguage: language,
       lastSignature: apg.signature,
       lastAveragePrice: apg.stats.average,
+      todayTypeDate: todayTypeInfo.todayTypeDate,
+      todayType: todayTypeInfo.todayType,
       history: [runRecord, ...(state.history || [])].slice(0, 50)
     };
 
     await writeJson(stateFile, nextState);
+    const userNotificationResult = await evaluateUserNotifications(apg, todayTypeInfo.todayType);
 
     res.json({
       ok: true,
       apg,
       hasChanged,
-      averagePriceDelta
+      averagePriceDelta,
+      fromCache,
+      userNotificationResult
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
@@ -506,13 +862,16 @@ app.post('/api/check', assertSecret, async (req, res) => {
       lastTargetDate: null,
       lastSignature: null,
       lastAveragePrice: null,
+      todayTypeDate: null,
+      todayType: null,
       history: []
     });
+    const todayTypeInfo = resolveTodayType(state);
 
     const language = String(req.query.language || APG_LANGUAGE);
     const date = req.query.date ? String(req.query.date) : undefined;
 
-    const apg = await fetchApgDayAhead({ date, language });
+    const { apg, fromCache } = await getCachedOrFetchApgDayAhead({ date, language });
 
     const sameScope =
       state.lastTargetDate === apg.targetDate &&
@@ -549,6 +908,8 @@ app.post('/api/check', assertSecret, async (req, res) => {
       lastLanguage: language,
       lastSignature: apg.signature,
       lastAveragePrice: apg.stats.average,
+      todayTypeDate: todayTypeInfo.todayTypeDate,
+      todayType: todayTypeInfo.todayType,
       history: [runRecord, ...(state.history || [])].slice(0, 50)
     };
 
@@ -576,12 +937,16 @@ app.post('/api/check', assertSecret, async (req, res) => {
       });
     }
 
+    const userNotificationResult = await evaluateUserNotifications(apg, todayTypeInfo.todayType);
+
     res.json({
       ok: true,
       hasChanged,
       averagePriceDelta,
       apg,
-      pushResult
+      fromCache,
+      pushResult,
+      userNotificationResult
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });

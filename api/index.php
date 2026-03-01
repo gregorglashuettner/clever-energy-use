@@ -15,6 +15,7 @@ $rootDir = dirname(__DIR__);
 $dataDir = $rootDir . '/data';
 $stateFile = $dataDir . '/state.json';
 $subscriptionsFile = $dataDir . '/subscriptions.json';
+$apgCacheFile = $dataDir . '/apg-cache.json';
 
 if (is_file($rootDir . '/vendor/autoload.php')) {
     require_once $rootDir . '/vendor/autoload.php';
@@ -33,7 +34,7 @@ $config = [
     'VAPID_SUBJECT' => envValue('VAPID_SUBJECT', 'mailto:admin@example.com')
 ];
 
-ensureDataFiles($dataDir, $stateFile, $subscriptionsFile);
+ensureDataFiles($dataDir, $stateFile, $subscriptionsFile, $apgCacheFile);
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path = requestPath();
@@ -58,6 +59,8 @@ try {
             'lastTargetDate' => $state['lastTargetDate'] ?? null,
             'lastAveragePrice' => $state['lastAveragePrice'] ?? null,
             'lastCheckedAt' => $state['lastCheckedAt'] ?? null,
+            'todayTypeDate' => $state['todayTypeDate'] ?? null,
+            'todayType' => $state['todayType'] ?? null,
             'latestRun' => $state['history'][0] ?? null,
             'subscribers' => count($subscriptions)
         ]);
@@ -80,10 +83,13 @@ try {
 
     if ($method === 'GET' && $path === '/data') {
         $state = readJson($stateFile, defaultState());
+        $todayTypeInfo = resolveTodayType($state);
         $language = (string) ($query['language'] ?? $config['APG_LANGUAGE']);
         $date = isset($query['date']) ? (string) $query['date'] : null;
 
-        $apg = fetchApgDayAhead($config, $date, $language);
+        $cached = fetchApgDayAheadCached($config, $apgCacheFile, $date, $language);
+        $apg = $cached['apg'];
+        $fromCache = (bool) ($cached['fromCache'] ?? false);
 
         $sameScope = (($state['lastTargetDate'] ?? null) === ($apg['targetDate'] ?? null))
             && (($state['lastLanguage'] ?? null) === $language);
@@ -129,11 +135,14 @@ try {
             'lastLanguage' => $language,
             'lastSignature' => $apg['signature'],
             'lastAveragePrice' => $apg['stats']['average'],
+            'todayTypeDate' => $todayTypeInfo['todayTypeDate'],
+            'todayType' => $todayTypeInfo['todayType'],
             'history' => $nextHistory
         ];
 
         writeJson($stateFile, $nextState);
-        jsonResponse(200, ['ok' => true, 'apg' => $apg, 'hasChanged' => $hasChanged, 'averagePriceDelta' => $averagePriceDelta]);
+        $userNotificationResult = evaluateUserNotifications($subscriptionsFile, $apg, $config, $todayTypeInfo['todayType']);
+        jsonResponse(200, ['ok' => true, 'apg' => $apg, 'hasChanged' => $hasChanged, 'averagePriceDelta' => $averagePriceDelta, 'fromCache' => $fromCache, 'userNotificationResult' => $userNotificationResult]);
     }
 
     if ($method === 'POST' && $path === '/subscribe') {
@@ -220,10 +229,13 @@ try {
         assertSecret($config['WEBSITE_CHECK_SECRET'], $query);
 
         $state = readJson($stateFile, defaultState());
+        $todayTypeInfo = resolveTodayType($state);
         $language = (string) ($query['language'] ?? $config['APG_LANGUAGE']);
         $date = isset($query['date']) ? (string) $query['date'] : null;
 
-        $apg = fetchApgDayAhead($config, $date, $language);
+        $cached = fetchApgDayAheadCached($config, $apgCacheFile, $date, $language);
+        $apg = $cached['apg'];
+        $fromCache = (bool) ($cached['fromCache'] ?? false);
 
         $sameScope = (($state['lastTargetDate'] ?? null) === ($apg['targetDate'] ?? null))
             && (($state['lastLanguage'] ?? null) === $language);
@@ -269,6 +281,8 @@ try {
             'lastLanguage' => $language,
             'lastSignature' => $apg['signature'],
             'lastAveragePrice' => $apg['stats']['average'],
+            'todayTypeDate' => $todayTypeInfo['todayTypeDate'],
+            'todayType' => $todayTypeInfo['todayType'],
             'history' => $nextHistory
         ];
 
@@ -308,12 +322,16 @@ try {
             );
         }
 
+        $userNotificationResult = evaluateUserNotifications($subscriptionsFile, $apg, $config, $todayTypeInfo['todayType']);
+
         jsonResponse(200, [
             'ok' => true,
             'hasChanged' => $hasChanged,
             'averagePriceDelta' => $averagePriceDelta,
             'apg' => $apg,
-            'pushResult' => $pushResult
+            'fromCache' => $fromCache,
+            'pushResult' => $pushResult,
+            'userNotificationResult' => $userNotificationResult
         ]);
     }
 
@@ -414,7 +432,7 @@ function jsonResponse(int $status, array $payload): void
     exit;
 }
 
-function ensureDataFiles(string $dataDir, string $stateFile, string $subscriptionsFile): void
+function ensureDataFiles(string $dataDir, string $stateFile, string $subscriptionsFile, string $apgCacheFile): void
 {
     if (!is_dir($dataDir) && !mkdir($dataDir, 0775, true) && !is_dir($dataDir)) {
         throw new RuntimeException('Failed to create data directory');
@@ -427,6 +445,10 @@ function ensureDataFiles(string $dataDir, string $stateFile, string $subscriptio
     if (!is_file($subscriptionsFile)) {
         writeJson($subscriptionsFile, []);
     }
+
+    if (!is_file($apgCacheFile)) {
+        writeJson($apgCacheFile, ['entries' => []]);
+    }
 }
 
 function defaultState(): array
@@ -436,6 +458,8 @@ function defaultState(): array
         'lastTargetDate' => null,
         'lastSignature' => null,
         'lastAveragePrice' => null,
+        'todayTypeDate' => null,
+        'todayType' => null,
         'history' => []
     ];
 }
@@ -500,6 +524,22 @@ function getTargetDate(array $config, ?string $requestedDate): string
     $offset = filter_var($config['APG_DAY_OFFSET'], FILTER_VALIDATE_INT);
     $safeOffset = ($offset === false) ? 1 : (int) $offset;
     return addDays(todayViennaDateString(), $safeOffset);
+}
+
+function resolveTodayType(array $state): array
+{
+    $now = getViennaNowParts();
+    $todayKey = dateObjToKey($now);
+    $persistedType = $state['todayType'] ?? null;
+    if (
+        ($state['todayTypeDate'] ?? null) === $todayKey
+        && ($persistedType === 'Werktag' || $persistedType === 'Feiertag/Wochenende')
+    ) {
+        return ['todayTypeDate' => $todayKey, 'todayType' => $persistedType];
+    }
+
+    $dayType = (isAustriaHoliday($now) || isWeekendDate($now)) ? 'Feiertag/Wochenende' : 'Werktag';
+    return ['todayTypeDate' => $todayKey, 'todayType' => $dayType];
 }
 
 function pickPriceValue(array $columnNames, array $rowValues): array
@@ -647,6 +687,31 @@ function fetchApgDayAhead(array $config, ?string $date, string $language): array
     ];
 }
 
+function fetchApgDayAheadCached(array $config, string $apgCacheFile, ?string $date, string $language): array
+{
+    $targetDate = getTargetDate($config, $date);
+    $cache = readJson($apgCacheFile, ['entries' => []]);
+    $entries = isset($cache['entries']) && is_array($cache['entries']) ? $cache['entries'] : [];
+    $key = $targetDate . '|' . $language . '|PT15M';
+    $entry = $entries[$key] ?? null;
+    $maxAgeSeconds = 2 * 60 * 60;
+
+    if (is_array($entry) && isset($entry['fetchedAt'], $entry['apg']) && is_array($entry['apg'])) {
+        $ts = strtotime((string) $entry['fetchedAt']);
+        if ($ts !== false && (time() - $ts) <= $maxAgeSeconds) {
+            return ['apg' => $entry['apg'], 'fromCache' => true];
+        }
+    }
+
+    $apg = fetchApgDayAhead($config, $targetDate, $language);
+    $entries[$key] = [
+        'fetchedAt' => gmdate('c'),
+        'apg' => $apg
+    ];
+    writeJson($apgCacheFile, ['entries' => $entries]);
+    return ['apg' => $apg, 'fromCache' => false];
+}
+
 function httpGetJson(string $url): array
 {
     $ch = curl_init($url);
@@ -734,6 +799,300 @@ function normalizeNotificationSettings($input): array
     }
 
     return $settings;
+}
+
+function getViennaNowParts(): array
+{
+    $dt = new DateTimeImmutable('now', new DateTimeZone('Europe/Vienna'));
+    return [
+        'year' => (int) $dt->format('Y'),
+        'month' => (int) $dt->format('m'),
+        'day' => (int) $dt->format('d'),
+        'hour' => (int) $dt->format('H'),
+        'minute' => (int) $dt->format('i')
+    ];
+}
+
+function dateObjToKey(array $date): string
+{
+    return sprintf('%04d-%02d-%02d', (int) $date['year'], (int) $date['month'], (int) $date['day']);
+}
+
+function timeToMinutes($value): ?int
+{
+    if (!is_string($value) || !preg_match('/^\d{2}:\d{2}$/', $value)) {
+        return null;
+    }
+    [$h, $m] = array_map('intval', explode(':', $value));
+    return $h * 60 + $m;
+}
+
+function easterSundayDate(int $year): array
+{
+    $base = new DateTimeImmutable('@' . easter_date($year));
+    $utc = $base->setTimezone(new DateTimeZone('UTC'));
+    return [
+        'year' => (int) $utc->format('Y'),
+        'month' => (int) $utc->format('m'),
+        'day' => (int) $utc->format('d')
+    ];
+}
+
+function addDaysToDateObj(array $date, int $days): array
+{
+    $dt = DateTimeImmutable::createFromFormat('Y-m-d', dateObjToKey($date), new DateTimeZone('UTC'));
+    if (!$dt) {
+        return $date;
+    }
+    $next = $dt->modify(($days >= 0 ? '+' : '') . $days . ' day');
+    return [
+        'year' => (int) $next->format('Y'),
+        'month' => (int) $next->format('m'),
+        'day' => (int) $next->format('d')
+    ];
+}
+
+function buildAustriaHolidaySet(int $year): array
+{
+    $holidays = [
+        sprintf('%04d-01-01', $year),
+        sprintf('%04d-01-06', $year),
+        sprintf('%04d-05-01', $year),
+        sprintf('%04d-08-15', $year),
+        sprintf('%04d-10-26', $year),
+        sprintf('%04d-11-01', $year),
+        sprintf('%04d-12-08', $year),
+        sprintf('%04d-12-25', $year),
+        sprintf('%04d-12-26', $year)
+    ];
+
+    $easter = easterSundayDate($year);
+    foreach ([1, 39, 50, 60] as $offset) {
+        $holidays[] = dateObjToKey(addDaysToDateObj($easter, $offset));
+    }
+
+    return array_values(array_unique($holidays));
+}
+
+function isAustriaHoliday(array $date): bool
+{
+    return in_array(dateObjToKey($date), buildAustriaHolidaySet((int) $date['year']), true);
+}
+
+function isWeekendDate(array $date): bool
+{
+    $dt = DateTimeImmutable::createFromFormat('Y-m-d', dateObjToKey($date), new DateTimeZone('UTC'));
+    if (!$dt) {
+        return false;
+    }
+    $weekday = (int) $dt->format('w'); // 0=Sun,6=Sat
+    return $weekday === 0 || $weekday === 6;
+}
+
+function pickWindowForDate(array $settings, array $date): array
+{
+    $holidayOrWeekend = isAustriaHoliday($date) || isWeekendDate($date);
+    if ($holidayOrWeekend) {
+        return ['start' => $settings['holidayStart'], 'end' => $settings['holidayEnd'], 'dayType' => 'Feiertag/Wochenende'];
+    }
+    return ['start' => $settings['weekdayStart'], 'end' => $settings['weekdayEnd'], 'dayType' => 'Werktag'];
+}
+
+function pickWindowForDayType(array $settings, string $dayType): array
+{
+    if ($dayType === 'Feiertag/Wochenende') {
+        return ['start' => $settings['holidayStart'], 'end' => $settings['holidayEnd'], 'dayType' => $dayType];
+    }
+    return ['start' => $settings['weekdayStart'], 'end' => $settings['weekdayEnd'], 'dayType' => 'Werktag'];
+}
+
+function filterSeriesByWindow(array $series, string $windowStart, string $windowEnd): array
+{
+    $startMin = timeToMinutes($windowStart);
+    $endMin = timeToMinutes($windowEnd);
+    if ($startMin === null || $endMin === null || $startMin >= $endMin) {
+        return [];
+    }
+
+    return array_values(array_filter($series, static function (array $row) use ($startMin, $endMin): bool {
+        $rowMin = timeToMinutes((string) ($row['timeFrom'] ?? ''));
+        return $rowMin !== null && $rowMin >= $startMin && $rowMin < $endMin;
+    }));
+}
+
+function findCheapestRangeInSeries(array $series, int $slotCount = 3): ?array
+{
+    if (count($series) < $slotCount) {
+        return null;
+    }
+    $values = [];
+    foreach ($series as $row) {
+        $v = $row['price'] ?? null;
+        if (!is_numeric($v)) {
+            return null;
+        }
+        $values[] = (float) $v;
+    }
+
+    $sum = 0.0;
+    for ($i = 0; $i < $slotCount; $i++) {
+        $sum += $values[$i];
+    }
+    $bestStart = 0;
+    $bestAvg = $sum / $slotCount;
+    for ($i = 1; $i <= count($values) - $slotCount; $i++) {
+        $sum += $values[$i + $slotCount - 1] - $values[$i - 1];
+        $avg = $sum / $slotCount;
+        if ($avg < $bestAvg) {
+            $bestAvg = $avg;
+            $bestStart = $i;
+        }
+    }
+
+    return [
+        'start' => $series[$bestStart],
+        'end' => $series[$bestStart + $slotCount - 1],
+        'average' => $bestAvg
+    ];
+}
+
+function sendPushToSingleEntry(array $entry, array $payload, array $config): array
+{
+    if (!class_exists('Minishlink\\WebPush\\WebPush') || !class_exists('Minishlink\\WebPush\\Subscription')) {
+        return ['ok' => false, 'invalid' => false, 'reason' => 'missing_library'];
+    }
+    if (($config['VAPID_PUBLIC_KEY'] ?? '') === '' || ($config['VAPID_PRIVATE_KEY'] ?? '') === '') {
+        return ['ok' => false, 'invalid' => false, 'reason' => 'missing_vapid'];
+    }
+
+    $auth = [
+        'VAPID' => [
+            'subject' => $config['VAPID_SUBJECT'],
+            'publicKey' => $config['VAPID_PUBLIC_KEY'],
+            'privateKey' => $config['VAPID_PRIVATE_KEY']
+        ]
+    ];
+    $webPush = new Minishlink\WebPush\WebPush($auth);
+    $jsonPayload = json_encode($payload, JSON_UNESCAPED_SLASHES);
+    if ($jsonPayload === false) {
+        return ['ok' => false, 'invalid' => false, 'reason' => 'encode_failed'];
+    }
+
+    try {
+        $subscription = Minishlink\WebPush\Subscription::create($entry['subscription'] ?? []);
+        $report = $webPush->sendOneNotification($subscription, $jsonPayload);
+        if (method_exists($report, 'isSuccess') && $report->isSuccess()) {
+            return ['ok' => true, 'invalid' => false, 'reason' => null];
+        }
+        $response = method_exists($report, 'getResponse') ? $report->getResponse() : null;
+        $statusCode = ($response && method_exists($response, 'getStatusCode')) ? $response->getStatusCode() : null;
+        if ($statusCode === 404 || $statusCode === 410) {
+            return ['ok' => false, 'invalid' => true, 'reason' => 'gone'];
+        }
+        return ['ok' => false, 'invalid' => false, 'reason' => 'push_failed'];
+    } catch (Throwable $error) {
+        return ['ok' => false, 'invalid' => false, 'reason' => 'push_exception'];
+    }
+}
+
+function evaluateUserNotifications(string $subscriptionsFile, array $apg, array $config, string $todayType): array
+{
+    $subscriptions = readJson($subscriptionsFile, []);
+    if (count($subscriptions) === 0) {
+        return ['digestSent' => 0, 'cheapSent' => 0, 'removed' => 0, 'total' => 0, 'skipped' => 'no_subscriptions'];
+    }
+
+    $now = getViennaNowParts();
+    $todayKey = dateObjToKey($now);
+    if (($apg['targetDate'] ?? '') !== $todayKey) {
+        return ['digestSent' => 0, 'cheapSent' => 0, 'removed' => 0, 'total' => count($subscriptions), 'skipped' => 'not_today_target'];
+    }
+
+    $nowMinutes = ((int) $now['hour']) * 60 + (int) $now['minute'];
+    $digestSent = 0;
+    $cheapSent = 0;
+    $removed = 0;
+    $changed = false;
+    $keep = [];
+
+    foreach ($subscriptions as $entry) {
+        $settings = normalizeNotificationSettings($entry['settings'] ?? null);
+        $history = isset($entry['notificationHistory']) && is_array($entry['notificationHistory'])
+            ? $entry['notificationHistory']
+            : [];
+        $window = pickWindowForDayType($settings, $todayType);
+        $startMin = timeToMinutes($window['start']);
+        $endMin = timeToMinutes($window['end']);
+        $inWindow = $startMin !== null && $endMin !== null && $endMin > $startMin && $nowMinutes >= $startMin && $nowMinutes < $endMin;
+
+        $invalid = false;
+
+        if ($settings['dailyDigestEnabled'] && $inWindow && (($history['lastDigestDate'] ?? null) !== $todayKey)) {
+            $avg = is_numeric($apg['stats']['average'] ?? null) ? number_format((float) $apg['stats']['average'], 2, '.', '') : 'n/a';
+            $payload = [
+                'title' => 'Deine Benachrichtigung über den heutigen Strompreis',
+                'body' => 'Heute (' . $window['dayType'] . ') im Zeitfenster ' . $window['start'] . '-' . $window['end'] . ': Durchschnitt ' . $avg . ' EUR/MWh.',
+                'url' => '/',
+                'data' => ['type' => 'daily_digest', 'targetDate' => $apg['targetDate']]
+            ];
+            $send = sendPushToSingleEntry($entry, $payload, $config);
+            if ($send['invalid']) {
+                $invalid = true;
+            } elseif ($send['ok']) {
+                $digestSent++;
+                $history['lastDigestDate'] = $todayKey;
+                $changed = true;
+            }
+        }
+
+        if (!$invalid && $settings['cheapAlertEnabled'] && $inWindow && (($history['lastCheapAlertDate'] ?? null) !== $todayKey)) {
+            $windowSeries = filterSeriesByWindow($apg['series'] ?? [], $window['start'], $window['end']);
+            $cheapest = findCheapestRangeInSeries($windowSeries, 3);
+            if ($cheapest !== null) {
+                $cheapStart = timeToMinutes((string) ($cheapest['start']['timeFrom'] ?? ''));
+                $cheapEnd = timeToMinutes((string) ($cheapest['end']['timeTo'] ?? ''));
+                $inCheapRange = $cheapStart !== null && $cheapEnd !== null && $cheapEnd > $cheapStart && $nowMinutes >= $cheapStart && $nowMinutes < $cheapEnd;
+                if ($inCheapRange) {
+                    $payload = [
+                        'title' => 'Der Strom ist ab jetzt billig!',
+                        'body' => $window['dayType'] . ' ' . $window['start'] . '-' . $window['end'] . ': günstigster Bereich gestartet (' . (($cheapest['start']['timeFrom'] ?? '')) . '-' . (($cheapest['end']['timeTo'] ?? '')) . ').',
+                        'url' => '/',
+                        'data' => ['type' => 'cheap_alert', 'targetDate' => $apg['targetDate']]
+                    ];
+                    $send = sendPushToSingleEntry($entry, $payload, $config);
+                    if ($send['invalid']) {
+                        $invalid = true;
+                    } elseif ($send['ok']) {
+                        $cheapSent++;
+                        $history['lastCheapAlertDate'] = $todayKey;
+                        $changed = true;
+                    }
+                }
+            }
+        }
+
+        if ($invalid) {
+            $removed++;
+            $changed = true;
+            continue;
+        }
+
+        $entry['settings'] = $settings;
+        $entry['notificationHistory'] = $history;
+        $keep[] = $entry;
+    }
+
+    if ($changed) {
+        writeJson($subscriptionsFile, $keep);
+    }
+
+    return [
+        'digestSent' => $digestSent,
+        'cheapSent' => $cheapSent,
+        'removed' => $removed,
+        'total' => count($subscriptions),
+        'skipped' => null
+    ];
 }
 
 function assertSecret(string $checkSecret, array $query): void

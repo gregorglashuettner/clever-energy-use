@@ -82,6 +82,19 @@ Open `http://localhost:3000`.
 - `negativeHours`
 - `first`, `last`, `dayDelta` (`last-first`)
 
+## 4.1) Automatic per-user notifications on backend runs
+
+Whenever backend data/check runs execute, subscribed users are evaluated server-side:
+
+- Daily digest:
+  - Sent once per day if `dailyDigestEnabled=true` and current Vienna time is inside that user's active window (Werktag vs Feiertag/Wochenende).
+  - Title: `Deine Benachrichtigung über den heutigen Strompreis`
+- Cheap energy alert:
+  - Sent once per day if `cheapAlertEnabled=true`, current Vienna time is in the user's active window, and current time is inside that user's cheapest 45-minute range.
+  - Title: `Der Strom ist ab jetzt billig!`
+
+Delivery history is stored per subscription in `data/subscriptions.json`.
+
 ## 5) Mobile notifications (Android + iOS)
 
 - Android: Chromium-based browsers with Push API support.
@@ -102,6 +115,8 @@ The workflow runs every 15 minutes and can also be triggered manually.
 ## 7) Notes
 
 - Runtime data is persisted in `data/state.json` and `data/subscriptions.json`.
+- APG responses are cached in `data/apg-cache.json` and reused for up to 2 hours before refetch.
+- Backend stores today's Austria day type (`Werktag` vs `Feiertag/Wochenende`) in state and reuses it until the Vienna date changes.
 - Notification settings (Werktags/Feiertags windows + daily digest toggle) are stored server-side per subscription.
 - Production requires HTTPS (service worker + push notifications).
 - PHP API router lives in `api/index.php` and routes via `api/.htaccess`.
