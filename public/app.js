@@ -1,5 +1,11 @@
 const notificationToggle = document.getElementById('notificationToggle');
 const notificationToggleState = document.getElementById('notificationToggleState');
+const weekdayStartSelect = document.getElementById('weekdayStart');
+const weekdayEndSelect = document.getElementById('weekdayEnd');
+const holidayStartSelect = document.getElementById('holidayStart');
+const holidayEndSelect = document.getElementById('holidayEnd');
+const dailyDigestToggle = document.getElementById('dailyDigestToggle');
+const dailyDigestState = document.getElementById('dailyDigestState');
 const refreshBtn = document.getElementById('refreshBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
@@ -8,6 +14,7 @@ const permissionStateEl = document.getElementById('permissionState');
 let swRegistration;
 const apiBase = new URL('./api/', window.location.href);
 const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
+const SETTINGS_STORAGE_KEY = 'energy_watch_notification_settings';
 
 function apiUrl(path) {
   const normalized = path.replace(/^\/+/, '');
@@ -152,6 +159,90 @@ function updatePermissionText() {
   permissionStateEl.textContent = `Notification permission: ${Notification.permission}`;
 }
 
+function buildHalfHourSlots() {
+  const slots = [];
+  for (let hour = 4; hour <= 22; hour += 1) {
+    const hh = String(hour).padStart(2, '0');
+    slots.push(`${hh}:00`);
+    if (hour !== 22) {
+      slots.push(`${hh}:30`);
+    }
+  }
+  return slots;
+}
+
+function populateTimeSelect(selectEl, slots) {
+  if (!selectEl) return;
+  selectEl.innerHTML = '';
+  for (const slot of slots) {
+    const option = document.createElement('option');
+    option.value = slot;
+    option.textContent = slot;
+    selectEl.append(option);
+  }
+}
+
+function getSettingsDefaults() {
+  return {
+    weekdayStart: '08:00',
+    weekdayEnd: '20:00',
+    holidayStart: '10:00',
+    holidayEnd: '18:00',
+    dailyDigestEnabled: false
+  };
+}
+
+function loadNotificationSettings() {
+  const defaults = getSettingsDefaults();
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    return { ...defaults, ...parsed };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveNotificationSettings(settings) {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore local storage failures.
+  }
+}
+
+function collectNotificationSettings() {
+  return {
+    weekdayStart: weekdayStartSelect.value,
+    weekdayEnd: weekdayEndSelect.value,
+    holidayStart: holidayStartSelect.value,
+    holidayEnd: holidayEndSelect.value,
+    dailyDigestEnabled: dailyDigestToggle.checked
+  };
+}
+
+function setDailyDigestState(enabled) {
+  dailyDigestToggle.checked = enabled;
+  dailyDigestState.textContent = enabled
+    ? 'Tägliche Zusammenfassung an'
+    : 'Tägliche Zusammenfassung aus';
+}
+
+function applyNotificationSettings(settings) {
+  weekdayStartSelect.value = settings.weekdayStart;
+  weekdayEndSelect.value = settings.weekdayEnd;
+  holidayStartSelect.value = settings.holidayStart;
+  holidayEndSelect.value = settings.holidayEnd;
+  setDailyDigestState(Boolean(settings.dailyDigestEnabled));
+}
+
+function onNotificationSettingsChange() {
+  const settings = collectNotificationSettings();
+  setDailyDigestState(settings.dailyDigestEnabled);
+  saveNotificationSettings(settings);
+}
+
 function setToggleState(enabled) {
   notificationToggle.checked = enabled;
   notificationToggleState.textContent = enabled
@@ -258,12 +349,24 @@ async function refreshData() {
 }
 
 async function init() {
+  const slots = buildHalfHourSlots();
+  populateTimeSelect(weekdayStartSelect, slots);
+  populateTimeSelect(weekdayEndSelect, slots);
+  populateTimeSelect(holidayStartSelect, slots);
+  populateTimeSelect(holidayEndSelect, slots);
+  applyNotificationSettings(loadNotificationSettings());
+
   swRegistration = await navigator.serviceWorker.register('./sw.js');
   updatePermissionText();
   await syncNotificationToggle();
   await updateStatus();
 
   notificationToggle.addEventListener('change', onNotificationToggleChange);
+  weekdayStartSelect.addEventListener('change', onNotificationSettingsChange);
+  weekdayEndSelect.addEventListener('change', onNotificationSettingsChange);
+  holidayStartSelect.addEventListener('change', onNotificationSettingsChange);
+  holidayEndSelect.addEventListener('change', onNotificationSettingsChange);
+  dailyDigestToggle.addEventListener('change', onNotificationSettingsChange);
   refreshBtn.addEventListener('click', refreshData);
 }
 
