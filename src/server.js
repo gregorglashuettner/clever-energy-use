@@ -27,6 +27,8 @@ const {
 } = process.env;
 const APG_RESOLUTION = 'PT15M';
 const APG_CACHE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const MAX_STATE_HISTORY_ITEMS = 30;
+const MAX_STATE_FILE_BYTES = 128 * 1024;
 
 if (!WEBSITE_CHECK_SECRET) {
   throw new Error('Missing WEBSITE_CHECK_SECRET in environment');
@@ -87,6 +89,48 @@ async function readJson(file, fallback) {
 
 async function writeJson(file, value) {
   await fs.writeFile(file, JSON.stringify(value, null, 2), 'utf8');
+}
+
+function sanitizeRunRecord(record) {
+  if (!record || typeof record !== 'object') return null;
+  return {
+    at: record.at ?? null,
+    trigger: record.trigger ?? null,
+    targetDate: record.targetDate ?? null,
+    language: record.language ?? null,
+    averagePrice: record.averagePrice ?? null,
+    minPrice: record.minPrice ?? null,
+    maxPrice: record.maxPrice ?? null,
+    spread: record.spread ?? null,
+    negativeHours: record.negativeHours ?? null,
+    priceCount: record.priceCount ?? null,
+    hasChanged: record.hasChanged ?? null,
+    averagePriceDelta: record.averagePriceDelta ?? null
+  };
+}
+
+function compactStateForStorage(state) {
+  const next = {
+    lastCheckedAt: state?.lastCheckedAt ?? null,
+    lastTargetDate: state?.lastTargetDate ?? null,
+    lastLanguage: state?.lastLanguage ?? null,
+    lastSignature: state?.lastSignature ?? null,
+    lastAveragePrice: state?.lastAveragePrice ?? null,
+    todayTypeDate: state?.todayTypeDate ?? null,
+    todayType: state?.todayType ?? null,
+    history: Array.isArray(state?.history)
+      ? state.history.map(sanitizeRunRecord).filter(Boolean).slice(0, MAX_STATE_HISTORY_ITEMS)
+      : []
+  };
+
+  while (
+    next.history.length > 1 &&
+    Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_STATE_FILE_BYTES
+  ) {
+    next.history.pop();
+  }
+
+  return next;
 }
 
 function subscriptionId(subscription) {
@@ -742,12 +786,10 @@ app.get('/api/data', async (req, res) => {
       negativeHours: apg.stats.negativeHours,
       priceCount: apg.stats.count,
       hasChanged,
-      averagePriceDelta,
-      signature: apg.signature,
-      sourceVersion: apg.versionInformation
+      averagePriceDelta
     };
 
-    const nextState = {
+    const nextState = compactStateForStorage({
       lastCheckedAt: runRecord.at,
       lastTargetDate: apg.targetDate,
       lastLanguage: language,
@@ -755,8 +797,8 @@ app.get('/api/data', async (req, res) => {
       lastAveragePrice: apg.stats.average,
       todayTypeDate: todayTypeInfo.todayTypeDate,
       todayType: todayTypeInfo.todayType,
-      history: [runRecord, ...(state.history || [])].slice(0, 50)
-    };
+      history: [runRecord, ...(state.history || [])]
+    });
 
     await writeJson(stateFile, nextState);
     const userNotificationResult = await evaluateUserNotifications(apg, todayTypeInfo.todayType);
@@ -897,12 +939,10 @@ app.post('/api/check', assertSecret, async (req, res) => {
       negativeHours: apg.stats.negativeHours,
       priceCount: apg.stats.count,
       hasChanged,
-      averagePriceDelta,
-      signature: apg.signature,
-      sourceVersion: apg.versionInformation
+      averagePriceDelta
     };
 
-    const nextState = {
+    const nextState = compactStateForStorage({
       lastCheckedAt: runRecord.at,
       lastTargetDate: apg.targetDate,
       lastLanguage: language,
@@ -910,8 +950,8 @@ app.post('/api/check', assertSecret, async (req, res) => {
       lastAveragePrice: apg.stats.average,
       todayTypeDate: todayTypeInfo.todayTypeDate,
       todayType: todayTypeInfo.todayType,
-      history: [runRecord, ...(state.history || [])].slice(0, 50)
-    };
+      history: [runRecord, ...(state.history || [])]
+    });
 
     await writeJson(stateFile, nextState);
 

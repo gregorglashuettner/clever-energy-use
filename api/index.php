@@ -16,6 +16,8 @@ $dataDir = $rootDir . '/data';
 $stateFile = $dataDir . '/state.json';
 $subscriptionsFile = $dataDir . '/subscriptions.json';
 $apgCacheFile = $dataDir . '/apg-cache.json';
+const MAX_STATE_HISTORY_ITEMS = 30;
+const MAX_STATE_FILE_BYTES = 131072;
 
 if (is_file($rootDir . '/vendor/autoload.php')) {
     require_once $rootDir . '/vendor/autoload.php';
@@ -120,16 +122,10 @@ try {
             'negativeHours' => $apg['stats']['negativeHours'],
             'priceCount' => $apg['stats']['count'],
             'hasChanged' => $hasChanged,
-            'averagePriceDelta' => $averagePriceDelta,
-            'signature' => $apg['signature'],
-            'sourceVersion' => $apg['versionInformation'] ?? null
+            'averagePriceDelta' => $averagePriceDelta
         ];
 
-        $nextHistory = $state['history'] ?? [];
-        array_unshift($nextHistory, $runRecord);
-        $nextHistory = array_slice($nextHistory, 0, 50);
-
-        $nextState = [
+        $nextState = compactStateForStorage([
             'lastCheckedAt' => $runRecord['at'],
             'lastTargetDate' => $apg['targetDate'],
             'lastLanguage' => $language,
@@ -137,8 +133,8 @@ try {
             'lastAveragePrice' => $apg['stats']['average'],
             'todayTypeDate' => $todayTypeInfo['todayTypeDate'],
             'todayType' => $todayTypeInfo['todayType'],
-            'history' => $nextHistory
-        ];
+            'history' => array_merge([$runRecord], $state['history'] ?? [])
+        ]);
 
         writeJson($stateFile, $nextState);
         $userNotificationResult = evaluateUserNotifications($subscriptionsFile, $apg, $config, $todayTypeInfo['todayType']);
@@ -266,16 +262,10 @@ try {
             'negativeHours' => $apg['stats']['negativeHours'],
             'priceCount' => $apg['stats']['count'],
             'hasChanged' => $hasChanged,
-            'averagePriceDelta' => $averagePriceDelta,
-            'signature' => $apg['signature'],
-            'sourceVersion' => $apg['versionInformation'] ?? null
+            'averagePriceDelta' => $averagePriceDelta
         ];
 
-        $nextHistory = $state['history'] ?? [];
-        array_unshift($nextHistory, $runRecord);
-        $nextHistory = array_slice($nextHistory, 0, 50);
-
-        $nextState = [
+        $nextState = compactStateForStorage([
             'lastCheckedAt' => $runRecord['at'],
             'lastTargetDate' => $apg['targetDate'],
             'lastLanguage' => $language,
@@ -283,8 +273,8 @@ try {
             'lastAveragePrice' => $apg['stats']['average'],
             'todayTypeDate' => $todayTypeInfo['todayTypeDate'],
             'todayType' => $todayTypeInfo['todayType'],
-            'history' => $nextHistory
-        ];
+            'history' => array_merge([$runRecord], $state['history'] ?? [])
+        ]);
 
         writeJson($stateFile, $nextState);
 
@@ -462,6 +452,59 @@ function defaultState(): array
         'todayType' => null,
         'history' => []
     ];
+}
+
+function sanitizeRunRecord(array $record): array
+{
+    return [
+        'at' => $record['at'] ?? null,
+        'trigger' => $record['trigger'] ?? null,
+        'targetDate' => $record['targetDate'] ?? null,
+        'language' => $record['language'] ?? null,
+        'averagePrice' => $record['averagePrice'] ?? null,
+        'minPrice' => $record['minPrice'] ?? null,
+        'maxPrice' => $record['maxPrice'] ?? null,
+        'spread' => $record['spread'] ?? null,
+        'negativeHours' => $record['negativeHours'] ?? null,
+        'priceCount' => $record['priceCount'] ?? null,
+        'hasChanged' => $record['hasChanged'] ?? null,
+        'averagePriceDelta' => $record['averagePriceDelta'] ?? null
+    ];
+}
+
+function compactStateForStorage(array $state): array
+{
+    $history = [];
+    foreach (($state['history'] ?? []) as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $history[] = sanitizeRunRecord($item);
+        if (count($history) >= MAX_STATE_HISTORY_ITEMS) {
+            break;
+        }
+    }
+
+    $next = [
+        'lastCheckedAt' => $state['lastCheckedAt'] ?? null,
+        'lastTargetDate' => $state['lastTargetDate'] ?? null,
+        'lastLanguage' => $state['lastLanguage'] ?? null,
+        'lastSignature' => $state['lastSignature'] ?? null,
+        'lastAveragePrice' => $state['lastAveragePrice'] ?? null,
+        'todayTypeDate' => $state['todayTypeDate'] ?? null,
+        'todayType' => $state['todayType'] ?? null,
+        'history' => $history
+    ];
+
+    while (count($next['history']) > 1) {
+        $encoded = json_encode($next, JSON_UNESCAPED_SLASHES);
+        if ($encoded === false || strlen($encoded) <= MAX_STATE_FILE_BYTES) {
+            break;
+        }
+        array_pop($next['history']);
+    }
+
+    return $next;
 }
 
 function readJson(string $file, array $fallback): array

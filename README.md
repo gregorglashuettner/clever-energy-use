@@ -115,6 +115,7 @@ The workflow runs every 15 minutes and can also be triggered manually.
 ## 7) Notes
 
 - Runtime data is persisted in `data/state.json` and `data/subscriptions.json`.
+- `data/state.json` is pruned automatically to stay small (max 30 history entries, plus byte-size cap).
 - APG responses are cached in `data/apg-cache.json` and reused for up to 2 hours before refetch.
 - Backend stores today's Austria day type (`Werktag` vs `Feiertag/Wochenende`) in state and reuses it until the Vienna date changes.
 - Notification settings (Werktags/Feiertags windows + daily digest toggle) are stored server-side per subscription.
