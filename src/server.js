@@ -18,7 +18,7 @@ const {
   PORT = 3000,
   APG_BASE_URL = 'https://transparency.apg.at/api',
   APG_LANGUAGE = 'English',
-  APG_RESOLUTION = 'PT60M',
+  APG_RESOLUTION = 'PT15M',
   APG_DAY_OFFSET = '1',
   CHECK_SECRET,
   VAPID_PUBLIC_KEY,

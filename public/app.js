@@ -3,50 +3,35 @@ const unsubscribeBtn = document.getElementById('unsubscribeBtn');
 const refreshBtn = document.getElementById('refreshBtn');
 const checkBtn = document.getElementById('checkBtn');
 const statusEl = document.getElementById('status');
+const cheapestRangeEl = document.getElementById('cheapestRange');
 const permissionStateEl = document.getElementById('permissionState');
 const deviceNameInput = document.getElementById('deviceName');
 
 let swRegistration;
-const apiBaseCandidates = [
-  { mode: 'rewrite', base: new URL('./api/', window.location.href) },
-  { mode: 'pathinfo', base: new URL('./api/index.php/', window.location.href) },
-  { mode: 'query', base: new URL('./api/index.php', window.location.href) }
-];
-let activeApiBase = apiBaseCandidates[0];
+const apiBase = new URL('./api/', window.location.href);
+const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
 
-function apiUrl(path, candidate = activeApiBase) {
+function apiUrl(path) {
   const normalized = path.replace(/^\/+/, '');
-  if (candidate.mode === 'query') {
-    const url = new URL(candidate.base.toString());
-    url.searchParams.set('route', `/${normalized}`);
-    return url.toString();
-  }
-  return new URL(normalized, candidate.base).toString();
+  return new URL(normalized, apiBase).toString();
 }
 
-async function fetchJsonWithAutoBase(path, options = {}) {
-  const orderedBases = [activeApiBase, ...apiBaseCandidates.filter((candidate) => candidate.mode !== activeApiBase.mode)];
-  const errors = [];
-
-  for (const candidate of orderedBases) {
-    const url = apiUrl(path, candidate);
-    try {
-      const response = await fetch(url, options);
-      const raw = await response.text();
-      const data = JSON.parse(raw);
-
-      if (!response.ok) {
-        throw new Error(`API request failed (${response.status})`);
-      }
-
-      activeApiBase = candidate;
-      return data;
-    } catch (error) {
-      errors.push(`${url}: ${error.message}`);
-    }
+async function fetchJson(path, options = {}) {
+  const url = apiUrl(path);
+  const response = await fetch(url, options);
+  const raw = await response.text();
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`API did not return JSON from ${url}`);
   }
 
-  throw new Error(errors.join('\n'));
+  if (!response.ok) {
+    throw new Error(`API request failed (${response.status})`);
+  }
+
+  return data;
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -56,17 +41,111 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
+function resolutionToMinutes(resolution) {
+  if (resolution === 'PT15M') return 15;
+  return 15;
+}
+
+function normalizeDate(date) {
+  const value = String(date || '');
+  if (/^\d{8}$/.test(value)) {
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+  }
+  return value;
+}
+
+function normalizeTime(time) {
+  const value = String(time || '');
+  if (/^\d{6}$/.test(value)) {
+    return `${value.slice(0, 2)}:${value.slice(2, 4)}`;
+  }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(value)) {
+    return value.slice(0, 5);
+  }
+  return value;
+}
+
+function formatDateTime(date, time) {
+  return `${normalizeDate(date)} ${normalizeTime(time)}`.trim();
+}
+
+function findCheapestRange(series, resolution, minimumMinutes = 45) {
+  const slotMinutes = resolutionToMinutes(resolution);
+  const windowSize = Math.max(1, Math.ceil(minimumMinutes / slotMinutes));
+
+  if (!Array.isArray(series) || series.length < windowSize) {
+    return null;
+  }
+
+  const prices = series.map((row) => Number(row.price));
+  if (prices.some((price) => !Number.isFinite(price))) {
+    return null;
+  }
+
+  let currentSum = 0;
+  for (let i = 0; i < windowSize; i += 1) {
+    currentSum += prices[i];
+  }
+
+  let bestStart = 0;
+  let bestAverage = currentSum / windowSize;
+
+  for (let i = 1; i <= prices.length - windowSize; i += 1) {
+    currentSum += prices[i + windowSize - 1] - prices[i - 1];
+    const avg = currentSum / windowSize;
+    if (avg < bestAverage) {
+      bestAverage = avg;
+      bestStart = i;
+    }
+  }
+
+  const start = series[bestStart];
+  const end = series[bestStart + windowSize - 1];
+
+  return {
+    start,
+    end,
+    average: bestAverage,
+    durationMinutes: windowSize * slotMinutes
+  };
+}
+
+async function updateCheapestRange() {
+  const data = await fetchJson('/data?resolution=PT15M');
+  const apg = data?.apg;
+  const series = apg?.series || [];
+  const resolution = apg?.request?.resolution || 'PT15M';
+  const cheapest = findCheapestRange(series, resolution, 45);
+
+  if (!cheapest) {
+    cheapestRangeEl.textContent = `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): unavailable`;
+    return;
+  }
+
+  const startLabel = formatDateTime(cheapest.start.dateFrom, cheapest.start.timeFrom);
+  const endLabel = formatDateTime(cheapest.end.dateTo, cheapest.end.timeTo);
+  cheapestRangeEl.textContent =
+    `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): ${startLabel} - ${endLabel} ` +
+    `(avg ${cheapest.average.toFixed(2)} EUR/MWh, ${cheapest.durationMinutes} min)`;
+}
+
 async function getVapidPublicKey() {
-  const data = await fetchJsonWithAutoBase('/vapid-public-key');
+  const data = await fetchJson('/vapid-public-key');
   return data.publicKey;
 }
 
 async function updateStatus() {
   try {
-    const data = await fetchJsonWithAutoBase('/status');
+    const data = await fetchJson('/status');
     statusEl.textContent = JSON.stringify(data, null, 2);
   } catch (error) {
     statusEl.textContent = `Could not reach API.\n\n${error.message}`;
+  }
+
+  try {
+    await updateCheapestRange();
+  } catch (error) {
+    cheapestRangeEl.textContent = `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): unavailable (${error.message})`;
   }
 }
 
@@ -101,7 +180,7 @@ async function subscribe() {
       applicationServerKey
     }));
 
-  await fetchJsonWithAutoBase('/subscribe', {
+  await fetchJson('/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -124,7 +203,7 @@ async function unsubscribe() {
     return;
   }
 
-  await fetchJsonWithAutoBase('/unsubscribe', {
+  await fetchJson('/unsubscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint: subscription.endpoint })
@@ -139,7 +218,7 @@ async function runCheckNow() {
   const secret = prompt('Enter CHECK_SECRET to run a secure check:');
   if (!secret) return;
 
-  const data = await fetchJsonWithAutoBase('/check', {
+  const data = await fetchJson('/check?resolution=PT15M', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${secret}`

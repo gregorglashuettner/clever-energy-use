@@ -25,7 +25,7 @@ loadEnvFile($rootDir . '/.env');
 $config = [
     'APG_BASE_URL' => envValue('APG_BASE_URL', 'https://transparency.apg.at/api'),
     'APG_LANGUAGE' => envValue('APG_LANGUAGE', 'English'),
-    'APG_RESOLUTION' => envValue('APG_RESOLUTION', 'PT60M'),
+    'APG_RESOLUTION' => envValue('APG_RESOLUTION', 'PT15M'),
     'APG_DAY_OFFSET' => envValue('APG_DAY_OFFSET', '1'),
     'CHECK_SECRET' => envValue('CHECK_SECRET', ''),
     'VAPID_PUBLIC_KEY' => envValue('VAPID_PUBLIC_KEY', ''),
@@ -300,12 +300,6 @@ function loadEnvFile(string $file): void
 
 function requestPath(): string
 {
-    $routeOverride = $_GET['route'] ?? null;
-    if (is_string($routeOverride) && $routeOverride !== '') {
-        $normalized = '/' . ltrim($routeOverride, '/');
-        return $normalized === '' ? '/' : $normalized;
-    }
-
     $pathInfo = $_SERVER['PATH_INFO'] ?? null;
     if (is_string($pathInfo) && $pathInfo !== '') {
         return '/' . ltrim($pathInfo, '/');
