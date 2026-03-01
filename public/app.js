@@ -70,6 +70,129 @@ function formatDateTime(date, time) {
   return `${normalizeDate(date)} ${normalizeTime(time)}`.trim();
 }
 
+function parseTimeToMinutes(timeValue) {
+  const normalized = normalizeTime(timeValue);
+  const [h, m] = normalized.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function dateKey(dateObj) {
+  return `${String(dateObj.year).padStart(4, '0')}-${String(dateObj.month).padStart(2, '0')}-${String(dateObj.day).padStart(2, '0')}`;
+}
+
+function getTodayInVienna() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Vienna',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const get = (type) => Number(parts.find((p) => p.type === type)?.value);
+  return { year: get('year'), month: get('month'), day: get('day') };
+}
+
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return { year, month, day };
+}
+
+function addDaysToDate(dateObj, days) {
+  const dt = new Date(Date.UTC(dateObj.year, dateObj.month - 1, dateObj.day));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return {
+    year: dt.getUTCFullYear(),
+    month: dt.getUTCMonth() + 1,
+    day: dt.getUTCDate()
+  };
+}
+
+function buildAustriaHolidaySet(year) {
+  const holidays = new Set([
+    `${year}-01-01`,
+    `${year}-01-06`,
+    `${year}-05-01`,
+    `${year}-08-15`,
+    `${year}-10-26`,
+    `${year}-11-01`,
+    `${year}-12-08`,
+    `${year}-12-25`,
+    `${year}-12-26`
+  ]);
+
+  const easter = easterSunday(year);
+  const easterMonday = addDaysToDate(easter, 1);
+  const ascensionDay = addDaysToDate(easter, 39);
+  const whitMonday = addDaysToDate(easter, 50);
+  const corpusChristi = addDaysToDate(easter, 60);
+
+  for (const d of [easterMonday, ascensionDay, whitMonday, corpusChristi]) {
+    holidays.add(dateKey(d));
+  }
+
+  return holidays;
+}
+
+function getAustriaDayType(dateObj) {
+  const dt = new Date(Date.UTC(dateObj.year, dateObj.month - 1, dateObj.day));
+  const weekday = dt.getUTCDay(); // 0=Sun, 6=Sat
+  const isWeekend = weekday === 0 || weekday === 6;
+  const holidays = buildAustriaHolidaySet(dateObj.year);
+  const isHoliday = holidays.has(dateKey(dateObj));
+  const isWorkday = !isWeekend && !isHoliday;
+  return { isWorkday, isHoliday, isWeekend };
+}
+
+function filterSeriesByConfiguredWindow(series, settings) {
+  const today = getTodayInVienna();
+  const todayType = getAustriaDayType(today);
+  const useHolidayWindow = todayType.isHoliday || todayType.isWeekend;
+
+  const windowStart = useHolidayWindow ? settings.holidayStart : settings.weekdayStart;
+  const windowEnd = useHolidayWindow ? settings.holidayEnd : settings.weekdayEnd;
+
+  const startMinutes = parseTimeToMinutes(windowStart);
+  const endMinutes = parseTimeToMinutes(windowEnd);
+  if (startMinutes == null || endMinutes == null || startMinutes >= endMinutes) {
+    return {
+      filteredSeries: [],
+      windowStart,
+      windowEnd,
+      useHolidayWindow,
+      todayType,
+      reason: 'Invalid configured time window'
+    };
+  }
+
+  const filteredSeries = (series || []).filter((row) => {
+    const rowTime = parseTimeToMinutes(row.timeFrom);
+    if (rowTime == null) return false;
+    return rowTime >= startMinutes && rowTime < endMinutes;
+  });
+
+  return {
+    filteredSeries,
+    windowStart,
+    windowEnd,
+    useHolidayWindow,
+    todayType,
+    reason: null
+  };
+}
+
 function findCheapestRange(series, minimumMinutes = 45) {
   const slotMinutes = 15;
   const windowSize = Math.max(1, Math.ceil(minimumMinutes / slotMinutes));
@@ -115,17 +238,23 @@ async function updateCheapestRange() {
   const data = await fetchJson('/data');
   const apg = data?.apg;
   const series = apg?.series || [];
-  const cheapest = findCheapestRange(series, 45);
+  const settings = loadNotificationSettings();
+  const windowData = filterSeriesByConfiguredWindow(series, settings);
+  const cheapest = findCheapestRange(windowData.filteredSeries, 45);
+  const windowLabel = `${windowData.windowStart}-${windowData.windowEnd}`;
+  const dayLabel = windowData.useHolidayWindow ? 'Feiertag/Wochenende' : 'Werktag';
 
   if (!cheapest) {
-    cheapestRangeEl.textContent = `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): unavailable`;
+    const reason = windowData.reason ? ` (${windowData.reason})` : '';
+    cheapestRangeEl.textContent =
+      `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}, ${dayLabel}, Fenster ${windowLabel}): unavailable${reason}`;
     return;
   }
 
   const startLabel = formatDateTime(cheapest.start.dateFrom, cheapest.start.timeFrom);
   const endLabel = formatDateTime(cheapest.end.dateTo, cheapest.end.timeTo);
   cheapestRangeEl.textContent =
-    `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}): ${startLabel} - ${endLabel} ` +
+    `Cheapest range (>=45 min, ${LOCAL_TIMEZONE}, ${dayLabel}, Fenster ${windowLabel}): ${startLabel} - ${endLabel} ` +
     `(avg ${cheapest.average.toFixed(2)} EUR/MWh, ${cheapest.durationMinutes} min)`;
 }
 
