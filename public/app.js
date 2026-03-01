@@ -92,6 +92,11 @@ function getTodayInVienna() {
   return { year: get('year'), month: get('month'), day: get('day') };
 }
 
+function getTodayViennaDateString() {
+  const d = getTodayInVienna();
+  return dateKey(d);
+}
+
 function easterSunday(year) {
   const a = year % 19;
   const b = Math.floor(year / 100);
@@ -235,7 +240,8 @@ function findCheapestRange(series, minimumMinutes = 45) {
 }
 
 async function updateCheapestRange() {
-  const data = await fetchJson('/data');
+  const today = getTodayViennaDateString();
+  const data = await fetchJson(`/data?date=${today}`);
   const apg = data?.apg;
   const series = apg?.series || [];
   const settings = loadNotificationSettings();
