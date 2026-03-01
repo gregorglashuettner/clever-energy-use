@@ -1,0 +1,9 @@
+Options -Indexes
+
+RewriteEngine On
+
+# Block direct access to hidden files like .env, except ACME challenges.
+RewriteRule "(^|/)\.(?!well-known/)" - [F,L]
+
+# Prevent downloading runtime state data.
+RewriteRule ^data/ - [F,L]
