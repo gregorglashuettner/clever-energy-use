@@ -30,6 +30,7 @@ jobs:
         run: |
           rm -rf deploy
           mkdir -p deploy
+          cp .htaccess deploy/.htaccess
           cp -R public/. deploy/
           cp -R api deploy/api
           mkdir -p deploy/data

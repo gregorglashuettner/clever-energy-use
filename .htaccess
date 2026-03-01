@@ -5,5 +5,10 @@ RewriteEngine On
 # Block direct access to hidden files like .env, except ACME challenges.
 RewriteRule "(^|/)\.(?!well-known/)" - [F,L]
 
+# Explicitly block environment/config files.
+<FilesMatch "^(\\.env|\\.env\\..*|composer\\.(json|lock)|package(-lock)?\\.json)$">
+  Require all denied
+</FilesMatch>
+
 # Prevent downloading runtime state data.
 RewriteRule ^data/ - [F,L]
