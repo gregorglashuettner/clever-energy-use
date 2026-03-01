@@ -1,7 +1,6 @@
 const subscribeBtn = document.getElementById('subscribeBtn');
 const unsubscribeBtn = document.getElementById('unsubscribeBtn');
 const refreshBtn = document.getElementById('refreshBtn');
-const checkBtn = document.getElementById('checkBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
 const permissionStateEl = document.getElementById('permissionState');
@@ -9,7 +8,6 @@ const permissionStateEl = document.getElementById('permissionState');
 let swRegistration;
 const apiBase = new URL('./api/', window.location.href);
 const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
-const WEBSITE_CHECK_SECRET_STORAGE_KEY = 'energy_watch_check_secret';
 
 function apiUrl(path) {
   const normalized = path.replace(/^\/+/, '');
@@ -145,69 +143,6 @@ async function updateStatus() {
   }
 }
 
-function getStoredCheckSecret() {
-  try {
-    return localStorage.getItem(WEBSITE_CHECK_SECRET_STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-function setStoredCheckSecret(secret) {
-  try {
-    if (secret) {
-      localStorage.setItem(WEBSITE_CHECK_SECRET_STORAGE_KEY, secret);
-    }
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
-function clearStoredCheckSecret() {
-  try {
-    localStorage.removeItem(WEBSITE_CHECK_SECRET_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
-async function callCheck(secret) {
-  return fetchJson('/check', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secret}`
-    }
-  });
-}
-
-async function runSecureCheck({ promptIfMissing = true } = {}) {
-  let secret = getStoredCheckSecret();
-
-  if (!secret && promptIfMissing) {
-    secret = prompt('Enter WEBSITE_CHECK_SECRET to run a secure check:') || '';
-    if (!secret) return null;
-    setStoredCheckSecret(secret);
-  }
-
-  if (!secret) return null;
-
-  try {
-    return await callCheck(secret);
-  } catch (error) {
-    const unauthorized = error?.status === 401;
-    clearStoredCheckSecret();
-
-    if (unauthorized && promptIfMissing) {
-      const retriedSecret = prompt('Secret invalid. Enter WEBSITE_CHECK_SECRET again:') || '';
-      if (!retriedSecret) return null;
-      setStoredCheckSecret(retriedSecret);
-      return callCheck(retriedSecret);
-    }
-
-    throw error;
-  }
-}
-
 function updatePermissionText() {
   permissionStateEl.textContent = `Notification permission: ${Notification.permission}`;
 }
@@ -272,24 +207,7 @@ async function unsubscribe() {
   alert('Push notifications disabled.');
 }
 
-async function runCheckNow() {
-  try {
-    const data = await runSecureCheck({ promptIfMissing: true });
-    if (data) {
-      await updateStatus();
-    }
-  } catch (error) {
-    alert(`Check failed: ${error.message}`);
-  }
-}
-
-async function refreshWithCheck() {
-  try {
-    await runSecureCheck({ promptIfMissing: true });
-  } catch (error) {
-    alert(`Check failed: ${error.message}`);
-  }
-
+async function refreshData() {
   await updateStatus();
 }
 
@@ -300,8 +218,7 @@ async function init() {
 
   subscribeBtn.addEventListener('click', subscribe);
   unsubscribeBtn.addEventListener('click', unsubscribe);
-  refreshBtn.addEventListener('click', refreshWithCheck);
-  checkBtn.addEventListener('click', runCheckNow);
+  refreshBtn.addEventListener('click', refreshData);
 }
 
 init().catch((error) => {
