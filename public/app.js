@@ -6,6 +6,8 @@ const holidayStartSelect = document.getElementById('holidayStart');
 const holidayEndSelect = document.getElementById('holidayEnd');
 const dailyDigestToggle = document.getElementById('dailyDigestToggle');
 const dailyDigestState = document.getElementById('dailyDigestState');
+const priceChartEl = document.getElementById('priceChart');
+const priceChartMetaEl = document.getElementById('priceChartMeta');
 const refreshBtn = document.getElementById('refreshBtn');
 const statusEl = document.getElementById('status');
 const cheapestRangeEl = document.getElementById('cheapestRange');
@@ -239,6 +241,61 @@ function findCheapestRange(series, minimumMinutes = 45) {
   };
 }
 
+function renderPriceChart(series, windowData) {
+  if (!priceChartEl || !priceChartMetaEl) return;
+
+  if (!Array.isArray(series) || series.length < 2) {
+    priceChartEl.innerHTML =
+      '<text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="#3b5b56" font-size="14">Keine Daten im Zeitfenster</text>';
+    const dayLabel = windowData.useHolidayWindow ? 'Feiertag/Wochenende' : 'Werktag';
+    priceChartMetaEl.textContent = `${dayLabel}, Fenster ${windowData.windowStart}-${windowData.windowEnd}`;
+    return;
+  }
+
+  const values = series.map((row) => Number(row.price)).filter((v) => Number.isFinite(v));
+  if (values.length < 2) {
+    priceChartEl.innerHTML =
+      '<text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="#3b5b56" font-size="14">Keine gültigen Preisdaten</text>';
+    return;
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const width = 700;
+  const height = 240;
+  const left = 42;
+  const right = 18;
+  const top = 16;
+  const bottom = 30;
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+
+  const points = series.map((row, idx) => {
+    const x = left + (idx / (series.length - 1)) * plotW;
+    const y = top + ((max - Number(row.price)) / range) * plotH;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+
+  const firstLabel = normalizeTime(series[0].timeFrom);
+  const lastLabel = normalizeTime(series[series.length - 1].timeFrom);
+
+  priceChartEl.innerHTML = `
+    <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" stroke="#9ec7bf" stroke-width="1" />
+    <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="#9ec7bf" stroke-width="1" />
+    <polyline fill="none" stroke="#0a7b68" stroke-width="2.5" points="${points.join(' ')}" />
+    <text x="${left - 6}" y="${top + 4}" text-anchor="end" fill="#3b5b56" font-size="12">${max.toFixed(2)}</text>
+    <text x="${left - 6}" y="${height - bottom}" text-anchor="end" dominant-baseline="ideographic" fill="#3b5b56" font-size="12">${min.toFixed(2)}</text>
+    <text x="${left}" y="${height - 8}" text-anchor="start" fill="#3b5b56" font-size="12">${firstLabel}</text>
+    <text x="${width - right}" y="${height - 8}" text-anchor="end" fill="#3b5b56" font-size="12">${lastLabel}</text>
+  `;
+
+  const dayLabel = windowData.useHolidayWindow ? 'Feiertag/Wochenende' : 'Werktag';
+  priceChartMetaEl.textContent =
+    `${dayLabel}, Fenster ${windowData.windowStart}-${windowData.windowEnd}, ` +
+    `${values.length} Werte, min ${min.toFixed(2)} / max ${max.toFixed(2)} EUR/MWh`;
+}
+
 async function updateCheapestRange() {
   const today = getTodayViennaDateString();
   const data = await fetchJson(`/data?date=${today}`);
@@ -246,6 +303,7 @@ async function updateCheapestRange() {
   const series = apg?.series || [];
   const settings = loadNotificationSettings();
   const windowData = filterSeriesByConfiguredWindow(series, settings);
+  renderPriceChart(windowData.filteredSeries, windowData);
   const cheapest = findCheapestRange(windowData.filteredSeries, 45);
   const windowLabel = `${windowData.windowStart}-${windowData.windowEnd}`;
   const dayLabel = windowData.useHolidayWindow ? 'Feiertag/Wochenende' : 'Werktag';
