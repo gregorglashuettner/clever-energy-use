@@ -28,7 +28,9 @@ async function fetchJson(path, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(`API request failed (${response.status})`);
+    const error = new Error(`API request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
 
   return data;
@@ -161,6 +163,23 @@ function setStoredCheckSecret(secret) {
   }
 }
 
+function clearStoredCheckSecret() {
+  try {
+    localStorage.removeItem(WEBSITE_CHECK_SECRET_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+async function callCheck(secret) {
+  return fetchJson('/check', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${secret}`
+    }
+  });
+}
+
 async function runSecureCheck({ promptIfMissing = true } = {}) {
   let secret = getStoredCheckSecret();
 
@@ -173,20 +192,18 @@ async function runSecureCheck({ promptIfMissing = true } = {}) {
   if (!secret) return null;
 
   try {
-    return await fetchJson('/check', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${secret}`
-      }
-    });
+    return await callCheck(secret);
   } catch (error) {
-    if (promptIfMissing) {
-      try {
-        localStorage.removeItem(WEBSITE_CHECK_SECRET_STORAGE_KEY);
-      } catch {
-        // Ignore storage failures.
-      }
+    const unauthorized = error?.status === 401;
+    clearStoredCheckSecret();
+
+    if (unauthorized && promptIfMissing) {
+      const retriedSecret = prompt('Secret invalid. Enter WEBSITE_CHECK_SECRET again:') || '';
+      if (!retriedSecret) return null;
+      setStoredCheckSecret(retriedSecret);
+      return callCheck(retriedSecret);
     }
+
     throw error;
   }
 }
@@ -256,9 +273,13 @@ async function unsubscribe() {
 }
 
 async function runCheckNow() {
-  const data = await runSecureCheck({ promptIfMissing: true });
-  if (data) {
-    statusEl.textContent = JSON.stringify(data, null, 2);
+  try {
+    const data = await runSecureCheck({ promptIfMissing: true });
+    if (data) {
+      await updateStatus();
+    }
+  } catch (error) {
+    alert(`Check failed: ${error.message}`);
   }
 }
 
