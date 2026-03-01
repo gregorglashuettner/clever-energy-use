@@ -85,3 +85,19 @@ The workflow runs every 15 minutes and can also be triggered manually.
 
 - Runtime data is persisted in `data/state.json` and `data/subscriptions.json`.
 - Production requires HTTPS (service worker + push notifications).
+
+## 8) GitHub Pages frontend deployment
+
+Workflow file: `.github/workflows/deploy-pages.yml`
+
+- Trigger: push to `main` or manual dispatch.
+- Deployment source: `public/` folder.
+
+After pushing, enable Pages in your repository settings:
+
+1. Go to `Settings -> Pages`.
+2. Under `Build and deployment`, select `Source: GitHub Actions`.
+3. Run or re-run the `Deploy Website To GitHub Pages` workflow.
+
+The GitHub Pages site hosts only the frontend.  
+After opening the site, set the backend API URL in the `Backend API` field (for example `https://your-domain.com`) and click `Save API URL`.
