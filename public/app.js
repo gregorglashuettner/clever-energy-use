@@ -7,11 +7,37 @@ const permissionStateEl = document.getElementById('permissionState');
 const deviceNameInput = document.getElementById('deviceName');
 
 let swRegistration;
-const apiBase = new URL('./api/', window.location.href);
+const apiBaseCandidates = [new URL('./api/', window.location.href), new URL('./api/index.php/', window.location.href)];
+let activeApiBase = apiBaseCandidates[0];
 
-function apiUrl(path) {
+function apiUrl(path, base = activeApiBase) {
   const normalized = path.replace(/^\/+/, '');
-  return new URL(normalized, apiBase).toString();
+  return new URL(normalized, base).toString();
+}
+
+async function fetchJsonWithAutoBase(path, options = {}) {
+  const orderedBases = [activeApiBase, ...apiBaseCandidates.filter((base) => base.href !== activeApiBase.href)];
+  const errors = [];
+
+  for (const base of orderedBases) {
+    const url = apiUrl(path, base);
+    try {
+      const response = await fetch(url, options);
+      const raw = await response.text();
+      const data = JSON.parse(raw);
+
+      if (!response.ok) {
+        throw new Error(`API request failed (${response.status})`);
+      }
+
+      activeApiBase = base;
+      return data;
+    } catch (error) {
+      errors.push(`${url}: ${error.message}`);
+    }
+  }
+
+  throw new Error(errors.join('\n'));
 }
 
 function urlBase64ToUint8Array(base64String) {
@@ -22,29 +48,13 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 async function getVapidPublicKey() {
-  const response = await fetch(apiUrl('/vapid-public-key'));
-  if (!response.ok) {
-    throw new Error(`Could not load VAPID key (${response.status})`);
-  }
-  const data = await response.json();
+  const data = await fetchJsonWithAutoBase('/vapid-public-key');
   return data.publicKey;
 }
 
 async function updateStatus() {
   try {
-    const url = apiUrl('/status');
-    const response = await fetch(url);
-    const raw = await response.text();
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      throw new Error(`API did not return JSON from ${url}`);
-    }
-
-    if (!response.ok) {
-      throw new Error(`API request failed (${response.status})`);
-    }
+    const data = await fetchJsonWithAutoBase('/status');
     statusEl.textContent = JSON.stringify(data, null, 2);
   } catch (error) {
     statusEl.textContent = `Could not reach API.\n\n${error.message}`;
@@ -82,7 +92,7 @@ async function subscribe() {
       applicationServerKey
     }));
 
-  await fetch(apiUrl('/subscribe'), {
+  await fetchJsonWithAutoBase('/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -105,7 +115,7 @@ async function unsubscribe() {
     return;
   }
 
-  await fetch(apiUrl('/unsubscribe'), {
+  await fetchJsonWithAutoBase('/unsubscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint: subscription.endpoint })
@@ -120,14 +130,12 @@ async function runCheckNow() {
   const secret = prompt('Enter CHECK_SECRET to run a secure check:');
   if (!secret) return;
 
-  const response = await fetch(apiUrl('/check'), {
+  const data = await fetchJsonWithAutoBase('/check', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${secret}`
     }
   });
-
-  const data = await response.json();
   statusEl.textContent = JSON.stringify(data, null, 2);
 }
 
