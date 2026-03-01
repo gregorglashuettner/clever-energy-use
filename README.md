@@ -71,6 +71,8 @@ Open `http://localhost:3000`.
   - Optional query params: `date`, `language`
 - `POST /api/subscribe` / `POST /api/unsubscribe`
   - Device push subscription management.
+- `POST /api/settings`
+  - Updates notification window/digest settings for a subscribed device by endpoint.
 
 ## 4) Calculations returned
 
@@ -100,6 +102,7 @@ The workflow runs every 15 minutes and can also be triggered manually.
 ## 7) Notes
 
 - Runtime data is persisted in `data/state.json` and `data/subscriptions.json`.
+- Notification settings (Werktags/Feiertags windows + daily digest toggle) are stored server-side per subscription.
 - Production requires HTTPS (service worker + push notifications).
 - PHP API router lives in `api/index.php` and routes via `api/.htaccess`.
 - If `vendor/` is missing on PHP hosting, `/api/check` still works but push sending returns a warning.

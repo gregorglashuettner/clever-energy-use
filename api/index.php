@@ -138,6 +138,7 @@ try {
 
     if ($method === 'POST' && $path === '/subscribe') {
         $subscription = $body['subscription'] ?? null;
+        $settings = normalizeNotificationSettings($body['settings'] ?? null);
 
         if (!is_array($subscription)
             || !isset($subscription['endpoint'])
@@ -152,6 +153,7 @@ try {
         $entry = [
             'id' => $id,
             'subscription' => $subscription,
+            'settings' => $settings,
             'createdAt' => gmdate('c')
         ];
 
@@ -171,6 +173,32 @@ try {
 
         writeJson($subscriptionsFile, $subscriptions);
         jsonResponse(200, ['ok' => true, 'id' => $id]);
+    }
+
+    if ($method === 'POST' && $path === '/settings') {
+        $endpoint = (string) ($body['endpoint'] ?? '');
+        if ($endpoint === '') {
+            jsonResponse(400, ['error' => 'Missing endpoint']);
+        }
+
+        $settings = normalizeNotificationSettings($body['settings'] ?? null);
+        $subscriptions = readJson($subscriptionsFile, []);
+
+        $found = false;
+        foreach ($subscriptions as $idx => $entry) {
+            if (($entry['subscription']['endpoint'] ?? '') === $endpoint) {
+                $subscriptions[$idx]['settings'] = $settings;
+                $found = true;
+                break;
+            }
+        }
+
+        if (!$found) {
+            jsonResponse(404, ['error' => 'Subscription not found']);
+        }
+
+        writeJson($subscriptionsFile, $subscriptions);
+        jsonResponse(200, ['ok' => true]);
     }
 
     if ($method === 'POST' && $path === '/unsubscribe') {
@@ -659,6 +687,53 @@ function httpGetJson(string $url): array
 function subscriptionId(string $endpoint): string
 {
     return hash('sha256', $endpoint);
+}
+
+function defaultNotificationSettings(): array
+{
+    return [
+        'cheapAlertEnabled' => false,
+        'weekdayStart' => '08:00',
+        'weekdayEnd' => '20:00',
+        'holidayStart' => '10:00',
+        'holidayEnd' => '18:00',
+        'dailyDigestEnabled' => false
+    ];
+}
+
+function isValidHalfHourSlot($value): bool
+{
+    if (!is_string($value) || !preg_match('/^\d{2}:(00|30)$/', $value)) {
+        return false;
+    }
+    $parts = explode(':', $value);
+    $hour = (int) $parts[0];
+    $minute = (int) $parts[1];
+    $total = $hour * 60 + $minute;
+    return $total >= 240 && $total <= 1320;
+}
+
+function normalizeNotificationSettings($input): array
+{
+    $defaults = defaultNotificationSettings();
+    $raw = is_array($input) ? $input : [];
+    $settings = $defaults;
+
+    if (array_key_exists('cheapAlertEnabled', $raw)) {
+        $settings['cheapAlertEnabled'] = (bool) $raw['cheapAlertEnabled'];
+    }
+
+    foreach (['weekdayStart', 'weekdayEnd', 'holidayStart', 'holidayEnd'] as $key) {
+        if (array_key_exists($key, $raw) && isValidHalfHourSlot($raw[$key])) {
+            $settings[$key] = $raw[$key];
+        }
+    }
+
+    if (array_key_exists('dailyDigestEnabled', $raw)) {
+        $settings['dailyDigestEnabled'] = (bool) $raw['dailyDigestEnabled'];
+    }
+
+    return $settings;
 }
 
 function assertSecret(string $checkSecret, array $query): void

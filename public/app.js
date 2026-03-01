@@ -184,6 +184,7 @@ function populateTimeSelect(selectEl, slots) {
 
 function getSettingsDefaults() {
   return {
+    cheapAlertEnabled: false,
     weekdayStart: '08:00',
     weekdayEnd: '20:00',
     holidayStart: '10:00',
@@ -214,12 +215,34 @@ function saveNotificationSettings(settings) {
 
 function collectNotificationSettings() {
   return {
+    cheapAlertEnabled: notificationToggle.checked,
     weekdayStart: weekdayStartSelect.value,
     weekdayEnd: weekdayEndSelect.value,
     holidayStart: holidayStartSelect.value,
     holidayEnd: holidayEndSelect.value,
     dailyDigestEnabled: dailyDigestToggle.checked
   };
+}
+
+async function getCurrentSubscription() {
+  if (!swRegistration) return null;
+  return swRegistration.pushManager.getSubscription();
+}
+
+async function persistSettingsToServer(settings) {
+  const subscription = await getCurrentSubscription();
+  if (!subscription) return false;
+
+  await fetchJson('/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      endpoint: subscription.endpoint,
+      settings
+    })
+  });
+
+  return true;
 }
 
 function setDailyDigestState(enabled) {
@@ -230,6 +253,7 @@ function setDailyDigestState(enabled) {
 }
 
 function applyNotificationSettings(settings) {
+  setToggleState(Boolean(settings.cheapAlertEnabled));
   weekdayStartSelect.value = settings.weekdayStart;
   weekdayEndSelect.value = settings.weekdayEnd;
   holidayStartSelect.value = settings.holidayStart;
@@ -237,23 +261,27 @@ function applyNotificationSettings(settings) {
   setDailyDigestState(Boolean(settings.dailyDigestEnabled));
 }
 
-function onNotificationSettingsChange() {
+async function onNotificationSettingsChange() {
   const settings = collectNotificationSettings();
-  setDailyDigestState(settings.dailyDigestEnabled);
   saveNotificationSettings(settings);
+
+  try {
+    await persistSettingsToServer(settings);
+  } catch (error) {
+    console.error('Failed to persist settings to server:', error);
+  }
 }
 
 function setToggleState(enabled) {
   notificationToggle.checked = enabled;
   notificationToggleState.textContent = enabled
-    ? 'Benachrichtigungen an'
-    : 'Benachrichtigungen aus';
+    ? 'Benachrichtigen wenn der Strom billig wird an'
+    : 'Benachrichtigen wenn der Strom billig wird aus';
 }
 
 async function subscribe() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    alert('Web Push is not supported on this device/browser.');
-    return;
+    throw new Error('Web Push is not supported on this device/browser.');
   }
 
   if (Notification.permission === 'default') {
@@ -261,9 +289,12 @@ async function subscribe() {
   }
 
   if (Notification.permission !== 'granted') {
-    alert('Notification permission denied.');
     updatePermissionText();
-    return;
+    throw new Error('Notification permission denied.');
+  }
+
+  if (!swRegistration) {
+    throw new Error('Service worker not ready.');
   }
 
   const publicKey = await getVapidPublicKey();
@@ -281,13 +312,13 @@ async function subscribe() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      subscription
+      subscription,
+      settings: collectNotificationSettings()
     })
   });
 
-  await updateStatus();
   updatePermissionText();
-  setToggleState(true);
+  return true;
 }
 
 async function unsubscribe() {
@@ -295,7 +326,6 @@ async function unsubscribe() {
 
   const subscription = await swRegistration.pushManager.getSubscription();
   if (!subscription) {
-    alert('No active subscription found.');
     return;
   }
 
@@ -306,33 +336,57 @@ async function unsubscribe() {
   });
 
   await subscription.unsubscribe();
-  await updateStatus();
-  setToggleState(false);
 }
 
-async function syncNotificationToggle() {
-  if (!swRegistration) {
-    setToggleState(false);
-    return;
+function hasAnyPushFeatureEnabled(settings) {
+  return Boolean(settings.cheapAlertEnabled || settings.dailyDigestEnabled);
+}
+
+async function ensurePushChannelForSettings(settings) {
+  if (hasAnyPushFeatureEnabled(settings)) {
+    await subscribe();
+  } else {
+    await unsubscribe();
   }
-  const subscription = await swRegistration.pushManager.getSubscription();
-  setToggleState(Boolean(subscription));
 }
 
-async function onNotificationToggleChange() {
+async function handleFeatureToggleChange() {
+  const previousSettings = loadNotificationSettings();
+  const nextSettings = collectNotificationSettings();
+
   notificationToggle.disabled = true;
+  dailyDigestToggle.disabled = true;
+  setToggleState(nextSettings.cheapAlertEnabled);
+  setDailyDigestState(nextSettings.dailyDigestEnabled);
+
   try {
-    if (notificationToggle.checked) {
-      await subscribe();
-    } else {
-      await unsubscribe();
-    }
+    await ensurePushChannelForSettings(nextSettings);
+    saveNotificationSettings(nextSettings);
+    await onNotificationSettingsChange();
+    await updateStatus();
+    updatePermissionText();
   } catch (error) {
-    await syncNotificationToggle();
+    applyNotificationSettings(previousSettings);
+    saveNotificationSettings(previousSettings);
+    try {
+      await ensurePushChannelForSettings(previousSettings);
+      await onNotificationSettingsChange();
+    } catch {
+      // best effort rollback
+    }
     alert(`Notification update failed: ${error.message}`);
   } finally {
     notificationToggle.disabled = false;
+    dailyDigestToggle.disabled = false;
   }
+}
+
+async function onNotificationToggleChange() {
+  await handleFeatureToggleChange();
+}
+
+async function onDailyDigestToggleChange() {
+  await handleFeatureToggleChange();
 }
 
 async function refreshData() {
@@ -358,7 +412,18 @@ async function init() {
 
   swRegistration = await navigator.serviceWorker.register('./sw.js');
   updatePermissionText();
-  await syncNotificationToggle();
+  const subscription = await getCurrentSubscription();
+  if (!subscription) {
+    const settings = {
+      ...loadNotificationSettings(),
+      cheapAlertEnabled: false,
+      dailyDigestEnabled: false
+    };
+    applyNotificationSettings(settings);
+    saveNotificationSettings(settings);
+  } else {
+    await onNotificationSettingsChange();
+  }
   await updateStatus();
 
   notificationToggle.addEventListener('change', onNotificationToggleChange);
@@ -366,7 +431,7 @@ async function init() {
   weekdayEndSelect.addEventListener('change', onNotificationSettingsChange);
   holidayStartSelect.addEventListener('change', onNotificationSettingsChange);
   holidayEndSelect.addEventListener('change', onNotificationSettingsChange);
-  dailyDigestToggle.addEventListener('change', onNotificationSettingsChange);
+  dailyDigestToggle.addEventListener('change', onDailyDigestToggleChange);
   refreshBtn.addEventListener('click', refreshData);
 }
 

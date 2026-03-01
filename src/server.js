@@ -83,6 +83,48 @@ function subscriptionId(subscription) {
   return crypto.createHash('sha256').update(subscription.endpoint).digest('hex');
 }
 
+function defaultNotificationSettings() {
+  return {
+    cheapAlertEnabled: false,
+    weekdayStart: '08:00',
+    weekdayEnd: '20:00',
+    holidayStart: '10:00',
+    holidayEnd: '18:00',
+    dailyDigestEnabled: false
+  };
+}
+
+function isValidHalfHourSlot(value) {
+  if (typeof value !== 'string' || !/^\d{2}:(00|30)$/.test(value)) {
+    return false;
+  }
+  const [h, m] = value.split(':').map(Number);
+  const total = h * 60 + m;
+  return total >= 240 && total <= 1320;
+}
+
+function normalizeNotificationSettings(input) {
+  const defaults = defaultNotificationSettings();
+  const raw = input && typeof input === 'object' ? input : {};
+  const settings = { ...defaults };
+
+  if (typeof raw.cheapAlertEnabled === 'boolean') {
+    settings.cheapAlertEnabled = raw.cheapAlertEnabled;
+  }
+
+  for (const key of ['weekdayStart', 'weekdayEnd', 'holidayStart', 'holidayEnd']) {
+    if (isValidHalfHourSlot(raw[key])) {
+      settings[key] = raw[key];
+    }
+  }
+
+  if (typeof raw.dailyDigestEnabled === 'boolean') {
+    settings.dailyDigestEnabled = raw.dailyDigestEnabled;
+  }
+
+  return settings;
+}
+
 function todayViennaDateString() {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Vienna',
@@ -393,6 +435,7 @@ app.get('/api/spec', (_req, res) => {
 
 app.post('/api/subscribe', async (req, res) => {
   const subscription = req.body?.subscription;
+  const settings = normalizeNotificationSettings(req.body?.settings);
 
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
     return res.status(400).json({ error: 'Invalid push subscription payload' });
@@ -405,6 +448,7 @@ app.post('/api/subscribe', async (req, res) => {
   const entry = {
     id,
     subscription,
+    settings,
     createdAt: new Date().toISOString()
   };
 
@@ -417,6 +461,29 @@ app.post('/api/subscribe', async (req, res) => {
   await writeJson(subscriptionsFile, subscriptions);
 
   return res.json({ ok: true, id });
+});
+
+app.post('/api/settings', async (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (!endpoint) {
+    return res.status(400).json({ error: 'Missing endpoint' });
+  }
+
+  const settings = normalizeNotificationSettings(req.body?.settings);
+  const subscriptions = await readJson(subscriptionsFile, []);
+  const idx = subscriptions.findIndex((entry) => entry.subscription?.endpoint === endpoint);
+
+  if (idx < 0) {
+    return res.status(404).json({ error: 'Subscription not found' });
+  }
+
+  subscriptions[idx] = {
+    ...subscriptions[idx],
+    settings
+  };
+
+  await writeJson(subscriptionsFile, subscriptions);
+  return res.json({ ok: true });
 });
 
 app.post('/api/unsubscribe', async (req, res) => {
