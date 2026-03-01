@@ -61,7 +61,7 @@ Open `http://localhost:3000`.
 - `GET /api/data`
   - Fetches APG day-ahead prices and returns the raw series plus calculated stats.
   - Optional query params:
-    - `date=YYYY-MM-DD` (defaults to `today + APG_DAY_OFFSET` in Europe/Vienna)
+    - `date=YYYY-MM-DD` (defaults to `today + APG_DAY_OFFSET` in Europe/Vienna; default offset is `0`)
     - `language=English|German`
 - `GET /api/status`
   - Returns latest run metadata and subscriber count.
