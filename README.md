@@ -3,6 +3,7 @@
 This project contains:
 
 - An `Express` backend that reads Austrian Power Grid day-ahead spot prices from the APG Transparency API.
+- A `PHP` backend (`api/index.php`) for shared hosting without Node.js support.
 - Calculation logic for day-ahead prices (average/min/max/spread/negative-hours/day-delta).
 - A PWA webapp for Android/iOS push subscription.
 - A scheduled GitHub Actions workflow that triggers checks and sends push notifications on data changes.
@@ -14,6 +15,8 @@ This project contains:
 - Used endpoint: `/v1/EXAAD1P/Data/{language}/{resolution}/{fromlocal}/{tolocal}`
 
 ## 1) Setup
+
+### Node.js backend (optional)
 
 1. Install dependencies:
    ```bash
@@ -28,6 +31,20 @@ This project contains:
    npx web-push generate-vapid-keys
    ```
 4. Put the generated keys into `.env`.
+
+### PHP backend (shared hosting)
+
+1. Copy environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. Ensure your host points web root to the project deploy root (where `index.html` from `public/` is uploaded).
+3. Ensure PHP can write into `data/`.
+4. Optional for Web Push delivery from PHP:
+   ```bash
+   composer install --no-dev
+   ```
+   This installs `minishlink/web-push`.
 
 ## 2) Run locally
 
@@ -85,19 +102,23 @@ The workflow runs every 15 minutes and can also be triggered manually.
 
 - Runtime data is persisted in `data/state.json` and `data/subscriptions.json`.
 - Production requires HTTPS (service worker + push notifications).
+- PHP API router lives in `api/index.php` and routes via `api/.htaccess`.
+- If `vendor/` is missing on PHP hosting, `/api/check` still works but push sending returns a warning.
 
-## 8) GitHub Pages frontend deployment
+## 8) Shared hosting deployment (PHP backend + frontend)
 
-Workflow file: `.github/workflows/deploy-pages.yml`
+Workflow file: `.github/workflows/deploy-shared-hosting.yml`
 
-- Trigger: push to `main` or manual dispatch.
-- Deployment source: `public/` folder.
+Set repository secrets:
 
-After pushing, enable Pages in your repository settings:
+- `WEBHOSTING_FTP_SERVER`
+- `WEBHOSTING_FTP_USERNAME`
+- `WEBHOSTING_FTP_PASSWORD`
+- `WEBHOSTING_TARGET_DIR` (example: `/public_html/`)
 
-1. Go to `Settings -> Pages`.
-2. Under `Build and deployment`, select `Source: GitHub Actions`.
-3. Run or re-run the `Deploy Website To GitHub Pages` workflow.
+What gets deployed:
 
-The GitHub Pages site hosts only the frontend.  
-After opening the site, set the backend API URL in the `Backend API` field (for example `https://your-domain.com`) and click `Save API URL`.
+- `public/*` to web root (frontend files)
+- `api/*` to `/api` (PHP API endpoints)
+- `data/.gitkeep` to create `/data`
+- `.env.example` and `composer.json` (reference)

@@ -1,0 +1,9 @@
+{
+  "name": "clever-energy-use/backend-php",
+  "description": "PHP backend for APG day-ahead checks and push notifications.",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "minishlink/web-push": "^9.0"
+  }
+}

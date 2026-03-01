@@ -1,0 +1,49 @@
+name: Deploy To Shared Hosting (PHP)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required deployment secrets
+        env:
+          FTP_SERVER: ${{ secrets.WEBHOSTING_FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.WEBHOSTING_FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.WEBHOSTING_FTP_PASSWORD }}
+          TARGET_DIR: ${{ secrets.WEBHOSTING_TARGET_DIR }}
+        run: |
+          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ] || [ -z "$TARGET_DIR" ]; then
+            echo "Missing one or more required secrets:"
+            echo "WEBHOSTING_FTP_SERVER, WEBHOSTING_FTP_USERNAME, WEBHOSTING_FTP_PASSWORD, WEBHOSTING_TARGET_DIR"
+            exit 1
+          fi
+
+      - name: Assemble deploy folder
+        run: |
+          rm -rf deploy
+          mkdir -p deploy
+          cp -R public/. deploy/
+          cp -R api deploy/api
+          mkdir -p deploy/data
+          cp data/.gitkeep deploy/data/.gitkeep
+          cp .env.example deploy/.env.example
+          cp composer.json deploy/composer.json
+
+      - name: Deploy files via FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.WEBHOSTING_FTP_SERVER }}
+          username: ${{ secrets.WEBHOSTING_FTP_USERNAME }}
+          password: ${{ secrets.WEBHOSTING_FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./deploy/
+          server-dir: ${{ secrets.WEBHOSTING_TARGET_DIR }}
