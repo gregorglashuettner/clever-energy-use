@@ -27,7 +27,7 @@ $config = [
     'APG_LANGUAGE' => envValue('APG_LANGUAGE', 'English'),
     'APG_RESOLUTION' => envValue('APG_RESOLUTION', 'PT15M'),
     'APG_DAY_OFFSET' => envValue('APG_DAY_OFFSET', '1'),
-    'CHECK_SECRET' => envValue('CHECK_SECRET', ''),
+    'WEBSITE_CHECK_SECRET' => envValue('WEBSITE_CHECK_SECRET', ''),
     'VAPID_PUBLIC_KEY' => envValue('VAPID_PUBLIC_KEY', ''),
     'VAPID_PRIVATE_KEY' => envValue('VAPID_PRIVATE_KEY', ''),
     'VAPID_SUBJECT' => envValue('VAPID_SUBJECT', 'mailto:admin@example.com')
@@ -139,7 +139,7 @@ try {
     }
 
     if ($method === 'POST' && $path === '/check') {
-        assertSecret($config['CHECK_SECRET'], $query);
+        assertSecret($config['WEBSITE_CHECK_SECRET'], $query);
 
         $state = readJson($stateFile, defaultState());
         $language = (string) ($query['language'] ?? $config['APG_LANGUAGE']);
@@ -613,7 +613,7 @@ function subscriptionId(string $endpoint): string
 function assertSecret(string $checkSecret, array $query): void
 {
     if ($checkSecret === '') {
-        jsonResponse(500, ['ok' => false, 'error' => 'Missing CHECK_SECRET in environment']);
+        jsonResponse(500, ['ok' => false, 'error' => 'Missing WEBSITE_CHECK_SECRET in environment']);
     }
 
     $authHeader = (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');

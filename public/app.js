@@ -9,7 +9,7 @@ const permissionStateEl = document.getElementById('permissionState');
 let swRegistration;
 const apiBase = new URL('./api/', window.location.href);
 const LOCAL_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
-const CHECK_SECRET_STORAGE_KEY = 'energy_watch_check_secret';
+const WEBSITE_CHECK_SECRET_STORAGE_KEY = 'energy_watch_check_secret';
 
 function apiUrl(path) {
   const normalized = path.replace(/^\/+/, '');
@@ -145,7 +145,7 @@ async function updateStatus() {
 
 function getStoredCheckSecret() {
   try {
-    return localStorage.getItem(CHECK_SECRET_STORAGE_KEY) || '';
+    return localStorage.getItem(WEBSITE_CHECK_SECRET_STORAGE_KEY) || '';
   } catch {
     return '';
   }
@@ -154,7 +154,7 @@ function getStoredCheckSecret() {
 function setStoredCheckSecret(secret) {
   try {
     if (secret) {
-      localStorage.setItem(CHECK_SECRET_STORAGE_KEY, secret);
+      localStorage.setItem(WEBSITE_CHECK_SECRET_STORAGE_KEY, secret);
     }
   } catch {
     // Ignore storage failures.
@@ -165,7 +165,7 @@ async function runSecureCheck({ promptIfMissing = true } = {}) {
   let secret = getStoredCheckSecret();
 
   if (!secret && promptIfMissing) {
-    secret = prompt('Enter CHECK_SECRET to run a secure check:') || '';
+    secret = prompt('Enter WEBSITE_CHECK_SECRET to run a secure check:') || '';
     if (!secret) return null;
     setStoredCheckSecret(secret);
   }
@@ -182,7 +182,7 @@ async function runSecureCheck({ promptIfMissing = true } = {}) {
   } catch (error) {
     if (promptIfMissing) {
       try {
-        localStorage.removeItem(CHECK_SECRET_STORAGE_KEY);
+        localStorage.removeItem(WEBSITE_CHECK_SECRET_STORAGE_KEY);
       } catch {
         // Ignore storage failures.
       }

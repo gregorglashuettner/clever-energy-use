@@ -67,7 +67,7 @@ Open `http://localhost:3000`.
   - Returns latest run metadata and subscriber count.
 - `POST /api/check`
   - Secure check endpoint used by GitHub Actions.
-  - Requires `Authorization: Bearer <CHECK_SECRET>`
+  - Requires `Authorization: Bearer <WEBSITE_CHECK_SECRET>`
   - Optional query params: `date`, `language`
 - `POST /api/subscribe` / `POST /api/unsubscribe`
   - Device push subscription management.
@@ -93,7 +93,7 @@ Set repository secrets:
 
 - `WEBSITE_CHECK_URL`: Full deployed `/api/check` URL
   - Example: `https://your-domain.com/api/check`
-- `WEBSITE_CHECK_SECRET`: Same value as `.env` `CHECK_SECRET`
+- `WEBSITE_CHECK_SECRET`: Same value as `.env` `WEBSITE_CHECK_SECRET`
 
 The workflow runs every 15 minutes and can also be triggered manually.
 

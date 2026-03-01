@@ -19,15 +19,15 @@ const {
   APG_BASE_URL = 'https://transparency.apg.at/api',
   APG_LANGUAGE = 'English',
   APG_DAY_OFFSET = '1',
-  CHECK_SECRET,
+  WEBSITE_CHECK_SECRET,
   VAPID_PUBLIC_KEY,
   VAPID_PRIVATE_KEY,
   VAPID_SUBJECT = 'mailto:admin@example.com'
 } = process.env;
 const APG_RESOLUTION = 'PT15M';
 
-if (!CHECK_SECRET) {
-  throw new Error('Missing CHECK_SECRET in environment');
+if (!WEBSITE_CHECK_SECRET) {
+  throw new Error('Missing WEBSITE_CHECK_SECRET in environment');
 }
 if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
   throw new Error('Missing VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY in environment');
@@ -276,7 +276,7 @@ function assertSecret(req, res, next) {
   const headerSecret = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   const querySecret = req.query.secret;
 
-  if (headerSecret === CHECK_SECRET || querySecret === CHECK_SECRET) {
+  if (headerSecret === WEBSITE_CHECK_SECRET || querySecret === WEBSITE_CHECK_SECRET) {
     return next();
   }
 
