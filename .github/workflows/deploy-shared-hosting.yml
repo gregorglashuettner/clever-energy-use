@@ -19,14 +19,31 @@ jobs:
           FTP_USERNAME: ${{ secrets.WEBHOSTING_FTP_USERNAME }}
           FTP_PASSWORD: ${{ secrets.WEBHOSTING_FTP_PASSWORD }}
           TARGET_DIR: ${{ secrets.WEBHOSTING_TARGET_DIR }}
+          WEBSITE_CHECK_SECRET: ${{ secrets.WEBSITE_CHECK_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
         run: |
           if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ] || [ -z "$TARGET_DIR" ]; then
             echo "Missing one or more required secrets:"
             echo "WEBHOSTING_FTP_SERVER, WEBHOSTING_FTP_USERNAME, WEBHOSTING_FTP_PASSWORD, WEBHOSTING_TARGET_DIR"
             exit 1
           fi
+          if [ -z "$WEBSITE_CHECK_SECRET" ] || [ -z "$VAPID_PUBLIC_KEY" ] || [ -z "$VAPID_PRIVATE_KEY" ] || [ -z "$VAPID_SUBJECT" ]; then
+            echo "Missing one or more required push/config secrets:"
+            echo "WEBSITE_CHECK_SECRET, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT"
+            exit 1
+          fi
+
+      - name: Install PHP dependencies for push delivery
+        run: composer install --no-dev --prefer-dist --optimize-autoloader
 
       - name: Assemble deploy folder
+        env:
+          WEBSITE_CHECK_SECRET: ${{ secrets.WEBSITE_CHECK_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
         run: |
           rm -rf deploy
           mkdir -p deploy
@@ -35,8 +52,18 @@ jobs:
           cp -R api deploy/api
           mkdir -p deploy/data
           cp data/.gitkeep deploy/data/.gitkeep
-          cp .env.example deploy/.env.example
           cp composer.json deploy/composer.json
+          cp -R vendor deploy/vendor
+          printf '%s\n' \
+            'APG_BASE_URL=https://transparency.apg.at/api' \
+            'APG_LANGUAGE=English' \
+            'APG_RESOLUTION=PT15M' \
+            'APG_DAY_OFFSET=0' \
+            "WEBSITE_CHECK_SECRET=$WEBSITE_CHECK_SECRET" \
+            "VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY" \
+            "VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY" \
+            "VAPID_SUBJECT=$VAPID_SUBJECT" \
+            > deploy/.env
 
       - name: Deploy files via FTPS
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5

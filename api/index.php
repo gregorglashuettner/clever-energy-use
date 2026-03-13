@@ -45,6 +45,9 @@ $body = requestJsonBody();
 
 try {
     if ($method === 'GET' && $path === '/vapid-public-key') {
+        if ($config['VAPID_PUBLIC_KEY'] === '') {
+            jsonResponse(500, ['error' => 'Push is not configured on the server']);
+        }
         jsonResponse(200, ['publicKey' => $config['VAPID_PUBLIC_KEY']]);
     }
 
@@ -64,7 +67,9 @@ try {
             'todayTypeDate' => $state['todayTypeDate'] ?? null,
             'todayType' => $state['todayType'] ?? null,
             'latestRun' => $state['history'][0] ?? null,
-            'subscribers' => count($subscriptions)
+            'subscribers' => count($subscriptions),
+            'pushConfigured' => $config['VAPID_PUBLIC_KEY'] !== '' && $config['VAPID_PRIVATE_KEY'] !== '',
+            'pushLibraryAvailable' => class_exists('Minishlink\\WebPush\\WebPush') && class_exists('Minishlink\\WebPush\\Subscription')
         ]);
     }
 

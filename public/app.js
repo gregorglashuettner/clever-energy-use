@@ -377,6 +377,9 @@ async function updateCheapestRange() {
 
 async function getVapidPublicKey() {
   const data = await fetchJson('/vapid-public-key');
+  if (!data.publicKey || typeof data.publicKey !== 'string') {
+    throw new Error('Push is not configured on the server.');
+  }
   return data.publicKey;
 }
 
