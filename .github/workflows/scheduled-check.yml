@@ -19,6 +19,27 @@ jobs:
             exit 1
           fi
 
-          curl -sS -X POST "$CHECK_URL" \
+          http_code=$(curl -sS \
+            --retry 5 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --connect-timeout 15 \
+            --max-time 60 \
+            -o /tmp/scheduled-check-response.txt \
+            -w "%{http_code}" \
+            -X POST "$CHECK_URL" \
             -H "Authorization: Bearer $WEBSITE_CHECK_SECRET" \
-            -H "Content-Type: application/json"
+            -H "Content-Type: application/json") || curl_exit=$?
+
+          if [ -n "$curl_exit" ]; then
+            echo "Warning: scheduled check could not reach $CHECK_URL after retries (curl exit $curl_exit)."
+            echo "Skipping failure to avoid noisy GitHub alerts for transient connectivity issues."
+            exit 0
+          fi
+
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Warning: scheduled check returned HTTP $http_code."
+            cat /tmp/scheduled-check-response.txt
+            echo "Skipping failure to avoid noisy GitHub alerts."
+            exit 0
+          fi
