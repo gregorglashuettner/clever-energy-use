@@ -1079,7 +1079,7 @@ function evaluateUserNotifications(string $subscriptionsFile, array $apg, array 
             $avg = is_numeric($apg['stats']['average'] ?? null) ? number_format((float) $apg['stats']['average'], 2, '.', '') : 'n/a';
             $payload = [
                 'title' => 'Deine Benachrichtigung über den heutigen Strompreis',
-                'body' => 'Heute (' . $window['dayType'] . ') im Zeitfenster ' . $window['start'] . '-' . $window['end'] . ': Durchschnitt ' . $avg . ' EUR/MWh.',
+                'body' => '', #'Heute (' . $window['dayType'] . ') im Zeitfenster ' . $window['start'] . '-' . $window['end'] . ': Durchschnitt ' . $avg . ' EUR/MWh.',
                 'url' => '/',
                 'data' => ['type' => 'daily_digest', 'targetDate' => $apg['targetDate']]
             ];
