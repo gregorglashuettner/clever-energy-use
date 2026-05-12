@@ -1,11 +1,10 @@
 self.addEventListener('push', (event) => {
   const payload = event.data ? event.data.json() : {};
-  const title = payload.title || 'Update';
-  const body = payload.body || 'New data is available.';
+  if (!payload.body) return;
 
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
+    self.registration.showNotification(payload.title || 'Update', {
+      body: payload.body,
       data: payload.data || {},
       vibrate: [100, 50, 100]
     })

@@ -2,8 +2,7 @@
 
 This project contains:
 
-- An `Express` backend that reads Austrian Power Grid day-ahead spot prices from the APG Transparency API.
-- A `PHP` backend (`api/index.php`) for shared hosting without Node.js support.
+- A `PHP` backend (`api/index.php`) for shared hosting.
 - Calculation logic for day-ahead prices (average/min/max/spread/negative-hours/day-delta).
 - A PWA webapp for Android/iOS push subscription.
 - A scheduled GitHub Actions workflow that triggers checks and sends push notifications on data changes.
@@ -16,45 +15,20 @@ This project contains:
 
 ## 1) Setup
 
-### Node.js backend (optional)
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Copy environment file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Generate VAPID keys:
-   ```bash
-   npx web-push generate-vapid-keys
-   ```
-4. Put the generated keys into `.env`.
-
-### PHP backend (shared hosting)
-
 1. Copy environment file:
    ```bash
    cp .env.example .env
    ```
-2. Ensure your host points web root to the project deploy root (where `index.html` from `public/` is uploaded).
-3. Ensure PHP can write into `data/`.
-4. Optional for Web Push delivery from PHP:
+2. Fill in all values in `.env` (VAPID keys, check secret, etc.).
+3. Ensure your host points the web root to the project deploy root (where `index.html` from `public/` is uploaded).
+4. Ensure PHP can write into `data/`.
+5. Install PHP push library:
    ```bash
    composer install --no-dev
    ```
-   This installs `minishlink/web-push`.
+   This installs `minishlink/web-push`. If `vendor/` is missing, `/api/check` still works but push sending returns a warning.
 
-## 2) Run locally
-
-```bash
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
-## 3) API endpoints
+## 2) API endpoints
 
 - `GET /api/spec`
   - Returns APG spec and endpoint contract used by this app.
@@ -74,7 +48,7 @@ Open `http://localhost:3000`.
 - `POST /api/settings`
   - Updates notification window/digest settings for a subscribed device by endpoint.
 
-## 4) Calculations returned
+## 3) Calculations returned
 
 - `average` (EUR/MWh)
 - `min` / `max` (EUR/MWh)
@@ -82,9 +56,9 @@ Open `http://localhost:3000`.
 - `negativeHours`
 - `first`, `last`, `dayDelta` (`last-first`)
 
-## 4.1) Automatic per-user notifications on backend runs
+## 3.1) Automatic per-user notifications on backend runs
 
-Whenever backend data/check runs execute, subscribed users are evaluated server-side:
+Whenever `/api/check` runs, subscribed users are evaluated server-side:
 
 - Daily digest:
   - Sent once per day if `dailyDigestEnabled=true` and current Vienna time is inside that user's active window (Werktag vs Feiertag/Wochenende).
@@ -95,12 +69,12 @@ Whenever backend data/check runs execute, subscribed users are evaluated server-
 
 Delivery history is stored per subscription in `data/subscriptions.json`.
 
-## 5) Mobile notifications (Android + iOS)
+## 4) Mobile notifications (Android + iOS)
 
 - Android: Chromium-based browsers with Push API support.
 - iOS: iOS/iPadOS 16.4+ and installed to Home Screen (PWA).
 
-## 6) GitHub Actions schedule
+## 5) GitHub Actions schedule
 
 Workflow file: `.github/workflows/scheduled-check.yml`
 
@@ -112,7 +86,7 @@ Set repository secrets:
 
 The workflow runs every 15 minutes and can also be triggered manually.
 
-## 7) Notes
+## 6) Notes
 
 - Runtime data is persisted in `data/state.json` and `data/subscriptions.json`.
 - `data/state.json` is pruned automatically to stay small (max 30 history entries, plus byte-size cap).
@@ -121,9 +95,8 @@ The workflow runs every 15 minutes and can also be triggered manually.
 - Notification settings (Werktags/Feiertags windows + daily digest toggle) are stored server-side per subscription.
 - Production requires HTTPS (service worker + push notifications).
 - PHP API router lives in `api/index.php` and routes via `api/.htaccess`.
-- If `vendor/` is missing on PHP hosting, `/api/check` still works but push sending returns a warning.
 
-## 8) Shared hosting deployment (PHP backend + frontend)
+## 7) Shared hosting deployment (PHP backend + frontend)
 
 Workflow file: `.github/workflows/deploy-shared-hosting.yml`
 
